@@ -7,7 +7,7 @@
 
 | 폴더 | 내용 |
 |------|------|
-| [`app/`](app/) | 제어용 웹앱 (Web Bluetooth) — [바로 열기](https://USERNAME.github.io/pov-wand/app/) |
+| [`app/`](app/) | 제어용 웹앱 (Web Bluetooth) — [바로 열기](https://mkseo90.github.io/present/app/) |
 | [`firmware/pov-wand/`](firmware/pov-wand/) | Seeed XIAO nRF52840 Sense 펌웨어 (Arduino) |
 | [`firmware/tools/`](firmware/tools/) | 폰트 헤더 생성 스크립트 |
 | [`PROTOCOL.md`](PROTOCOL.md) | 앱 ↔ 기기 BLE 통신 프로토콜 |
