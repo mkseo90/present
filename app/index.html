@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>선물</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪄</text></svg>">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri@latest/dist/galmuri.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div class="brand">🪄 <span id="appName">선물</span></div>
+  <button id="btnConnect" class="chip chip-connect">연결</button>
+</header>
+
+<main>
+  <!-- 보내기 -->
+  <section id="tab-send" class="tab active">
+    <div class="preview-box">
+      <canvas id="preview" width="320" height="64"></canvas>
+      <div class="preview-label">잔상 미리보기</div>
+    </div>
+
+    <textarea id="sendText" rows="2" maxlength="60" placeholder="문구를 입력하세요"></textarea>
+
+    <div class="color-row" id="colorRow">
+      <button class="swatch" data-color="FF4FA0" style="background:#FF4FA0"></button>
+      <button class="swatch" data-color="FFD644" style="background:#FFD644"></button>
+      <button class="swatch" data-color="4FE3C1" style="background:#4FE3C1"></button>
+      <button class="swatch" data-color="5AA9FF" style="background:#5AA9FF"></button>
+      <button class="swatch" data-color="B98BFF" style="background:#B98BFF"></button>
+      <button class="swatch-pill" data-color="rainbow">무지개</button>
+      <button class="swatch-pill" data-color="grad">그라데이션</button>
+    </div>
+    <div class="grad-row hidden" id="gradRow">
+      <input type="color" id="gradA" value="#FF4FA0">
+      <span>→</span>
+      <input type="color" id="gradB" value="#5AA9FF">
+    </div>
+
+    <button id="btnShow" class="btn-primary">✨ 지금 표시</button>
+
+    <div class="preset-head">
+      <span id="presetTitle">보내기 프리셋</span>
+      <button id="btnAddPreset" class="chip">+ 추가</button>
+    </div>
+    <ul id="presetList" class="preset-list"></ul>
+  </section>
+
+  <!-- 보관함 -->
+  <section id="tab-slots" class="tab">
+    <div class="slots-head">
+      <span>기기에 저장된 콘텐츠</span>
+      <span id="slotCount" class="muted"></span>
+    </div>
+    <ul id="slotList" class="slot-list"></ul>
+    <button id="btnSaveNew" class="btn-primary">💾 현재 문구를 슬롯에 저장</button>
+    <p class="hint">막대의 버튼을 누르면 슬롯이 순서대로 바뀌어요</p>
+  </section>
+
+  <!-- 설정 -->
+  <section id="tab-settings" class="tab">
+    <label class="setting">
+      <span>밝기 <b id="brightVal">80%</b></span>
+      <input type="range" id="bright" min="5" max="100" value="80" step="5">
+    </label>
+    <div class="setting">
+      <span>모드</span>
+      <div class="seg" id="modeSeg">
+        <button data-mode="auto" class="on">자동</button>
+        <button data-mode="pov">잔상</button>
+        <button data-mode="idle">은은</button>
+      </div>
+    </div>
+    <div class="info-card" id="infoCard">
+      <div><span>기기</span><b id="infDev">-</b></div>
+      <div><span>펌웨어</span><b id="infFw">-</b></div>
+      <div><span>배터리</span><b id="infBat">-</b></div>
+    </div>
+    <label class="setting simrow">
+      <span>시뮬레이터 모드 <small>(기기 없이 테스트)</small></span>
+      <input type="checkbox" id="simToggle">
+    </label>
+    <details class="log-box">
+      <summary>통신 로그</summary>
+      <pre id="log"></pre>
+    </details>
+
+    <div class="about-card">
+      <div class="about-logo">🪄</div>
+      <div class="about-name">선물</div>
+      <div class="about-ver">앱 버전 v0.1</div>
+      <div class="about-credits">
+        <div><span>앱 · 펌웨어</span><b>민경</b></div>
+        <div><span>하드웨어</span><b>지선</b></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav>
+  <button data-tab="send" class="on">📤<span>보내기</span></button>
+  <button data-tab="slots">📂<span>보관함</span></button>
+  <button data-tab="settings">⚙️<span>설정</span></button>
+</nav>
+
+<script src="app.js"></script>
+</body>
+</html>
