@@ -71,7 +71,7 @@ Nordic UART Service(NUS) 사용. BLE 상에 양방향 시리얼 통로를 만든
 | 명령 | 응답 예 |
 |------|---------|
 | `PING` | `PONG` |
-| `INFO` | `INFO fw=0.1 slots=12 used=5 bat=87 mode=auto bright=80` |
+| `INFO` | `INFO fw=0.1 slots=12 used=5 bat=87 mode=auto bright=80 owner=주인공 serial=No.001/001 mac=C4:F3:...` |
 
 ## 4. 응답 (기기 → 앱)
 
@@ -129,6 +129,13 @@ OK LIST
 | `EV SLEEP` / `EV WAKE` | 슬립 진입/기상 |
 | `EV BAT <퍼센트>` | 배터리 변화 (10% 단위) |
 
+## 부록: 주인 지정
+
+펌웨어의 `OWNERS[]` 테이블에 보드 MAC 주소(부팅 시 시리얼 모니터에 출력)를
+등록하면 그 보드의 주인 이름·시리얼이 정해진다. 등록된 보드는 부팅 크레딧으로
+`<이름>의 선물 <시리얼>`을 표시하고, `INFO` 응답에 `owner=`/`serial=`/`mac=`이 포함된다.
+이름에는 공백을 넣지 않는다 (INFO가 공백 구분이므로).
+
 ## 변경 이력
 
-- v0.1 (2026-07-29): 최초 작성
+- v0.1 (2026-07-29): 최초 작성. INFO에 owner/serial/mac 필드 추가

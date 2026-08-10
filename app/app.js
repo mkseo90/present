@@ -36,7 +36,7 @@ const sim = {
     const reply = (s) => setTimeout(() => onLine(s), 80);
     switch (cmd) {
       case "PING": return reply("PONG");
-      case "INFO": return reply(`INFO fw=sim slots=12 used=${this.slots.length} bat=100 mode=auto bright=80`);
+      case "INFO": return reply(`INFO fw=sim slots=12 used=${this.slots.length} bat=100 mode=auto bright=80 owner=주인공 serial=No.001/001 mac=SIM`);
       case "SHOW": return reply("OK SHOW");
       case "SAVE": {
         const n = parseInt(args[0]);
@@ -102,6 +102,8 @@ function onLine(line) {
     const kv = Object.fromEntries(rest.map((t) => t.split("=")));
     $("infFw").textContent = kv.fw || "-";
     $("infBat").textContent = (kv.bat || "-") + "%";
+    $("infOwner").textContent = kv.owner && kv.owner !== "-"
+      ? `${kv.owner} (${kv.serial || ""})` : "-";
     if (kv.bright) { $("bright").value = kv.bright; $("brightVal").textContent = kv.bright + "%"; }
     if (kv.mode) setSegUI(kv.mode);
   }
@@ -349,6 +351,19 @@ $("simToggle").onchange = (e) => {
     setConnUI(false);
   }
 };
+
+// 전체화면 (지원 브라우저에서만 버튼 노출)
+const fsRoot = document.documentElement;
+const fsReq = fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen;
+if (!fsReq) {
+  $("btnFull").style.display = "none";
+} else {
+  $("btnFull").onclick = () => {
+    const cur = document.fullscreenElement || document.webkitFullscreenElement;
+    if (cur) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    else fsReq.call(fsRoot);
+  };
+}
 
 if (!("bluetooth" in navigator)) {
   $("btnConnect").textContent = "BLE 미지원";

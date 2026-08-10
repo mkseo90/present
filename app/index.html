@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>선물</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪄</text></svg>">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#14121F">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri@latest/dist/galmuri.css">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -12,7 +17,10 @@
 
 <header>
   <div class="brand">🪄 <span id="appName">선물</span></div>
-  <button id="btnConnect" class="chip chip-connect">연결</button>
+  <div style="display:flex; gap:8px;">
+    <button id="btnFull" class="chip" aria-label="전체화면">⛶</button>
+    <button id="btnConnect" class="chip chip-connect">연결</button>
+  </div>
 </header>
 
 <main>
@@ -76,6 +84,7 @@
     </div>
     <div class="info-card" id="infoCard">
       <div><span>기기</span><b id="infDev">-</b></div>
+      <div><span>주인</span><b id="infOwner">-</b></div>
       <div><span>펌웨어</span><b id="infFw">-</b></div>
       <div><span>배터리</span><b id="infBat">-</b></div>
     </div>
