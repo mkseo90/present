@@ -363,6 +363,16 @@ if (!fsReq) {
     if (cur) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
     else fsReq.call(fsRoot);
   };
+  // 터치 기기: 첫 탭에 자동 전체화면 (사용자 조작이 있어야 브라우저가 허용)
+  if (matchMedia("(pointer: coarse)").matches) {
+    const once = () => {
+      window.removeEventListener("touchend", once);
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        try { fsReq.call(fsRoot); } catch (e) {}
+      }
+    };
+    window.addEventListener("touchend", once);
+  }
 }
 
 if (!("bluetooth" in navigator)) {
