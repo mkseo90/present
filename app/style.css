@@ -92,6 +92,7 @@ textarea:focus { outline: none; border-color: var(--violet); }
 .swatch-pill[data-color="grad"] { background: linear-gradient(90deg, #FF4FA0, #5AA9FF); color: #fff; }
 .swatch-pill.on { border-color: #fff; }
 .grad-row { display: flex; gap: 10px; align-items: center; color: var(--text-dim); }
+body.mono .color-row, body.mono .grad-row { display: none !important; }
 .grad-row input[type=color] { width: 44px; height: 32px; border: none; background: none; cursor: pointer; }
 .hidden { display: none !important; }
 

@@ -104,6 +104,7 @@ function onLine(line) {
     $("infBat").textContent = (kv.bat || "-") + "%";
     $("infOwner").textContent = kv.owner && kv.owner !== "-"
       ? `${kv.owner} (${kv.serial || ""})` : "-";
+    setMonoUI(!fwIsRgb(kv.fw));
     if (kv.bright) { $("bright").value = kv.bright; $("brightVal").textContent = kv.bright + "%"; }
     if (kv.mode) setSegUI(kv.mode);
   }
@@ -141,6 +142,7 @@ function onDisconnected() {
   state.device = null;
   state.rxChar = null;
   setConnUI(false);
+  setMonoUI(false); // 연결 해제 시 기본(풀컬러) UI로 복귀
 }
 function setConnUI(on, name) {
   const btn = $("btnConnect");
@@ -152,8 +154,24 @@ function toastConnectNeeded() {
   alert(state.sim ? "" : "기기를 먼저 연결하거나 시뮬레이터 모드를 켜세요 (설정 탭)");
 }
 
+// ---------- 펌웨어 버전 → UI 모드 ----------
+// fw 1.0.0 이상 = RGB 완드(풀컬러 UI), 미만 = GREEN 단색 완드(색 선택 숨김)
+function fwIsRgb(fw) {
+  const v = (fw || "").split(".").map(Number);
+  if (v.length < 3 || v.some(isNaN)) return true; // 시뮬레이터 등 판별 불가 → 풀 UI
+  return v[0] >= 1;
+}
+function setMonoUI(mono) {
+  state.mono = mono;
+  document.body.classList.toggle("mono", mono);
+  document.querySelector(".preview-label").textContent =
+    mono ? "잔상 미리보기 · GREEN 완드" : "잔상 미리보기";
+  renderPreview();
+}
+
 // ---------- 색 ----------
 function currentColorSpec() {
+  if (state.mono) return "00FF66";
   if (state.color === "rainbow") return "rainbow";
   if (state.color === "grad") {
     const a = $("gradA").value.slice(1).toUpperCase();
