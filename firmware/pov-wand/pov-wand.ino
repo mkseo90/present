@@ -9,7 +9,7 @@
 
 #include <bluefruit.h>
 // FS 격리 실험: 0이면 LittleFS(내장 플래시 저장)를 완전히 비활성화
-#define USE_FS 0
+#define USE_FS 1
 #if USE_FS
 #include <Adafruit_LittleFS.h>
 #include <InternalFileSystem.h>
@@ -60,14 +60,25 @@ BLEUart bleuart;
 char myMac[18] = "?";
 const Owner* owner = nullptr;
 
+// OWNERS[].mac 은 전체 MAC이 아니어도 된다 — 뒷부분만 적어도 일치로 본다.
+// 예) 보드가 AA:BB:CC:DD:EE:FF 라면 "EE:FF", "DD:EE:FF", 전체 중 아무거나 가능.
+// 시리얼에 찍히는 형식에서 그대로 잘라 붙이면 되므로 콜론 단위로 끊는 것을 권장한다
+// (임의의 글자 수로 자르면 콜론에 걸려 헷갈린다).
+bool macMatches(const char* pattern, const char* mac) {
+  size_t pl = strlen(pattern), ml = strlen(mac);
+  if (pl < 2 || pl > ml) return false;   // 너무 짧으면 오인 위험 → 최소 2글자
+  return strcasecmp(mac + (ml - pl), pattern) == 0;
+}
+
 void findOwner() {
   uint8_t m[6];
   Bluefruit.getAddr(m);
   snprintf(myMac, sizeof(myMac), "%02X:%02X:%02X:%02X:%02X:%02X",
            m[5], m[4], m[3], m[2], m[1], m[0]);
   Serial.print("MAC: "); Serial.println(myMac);
+  Serial.flush();
   for (uint8_t i = 0; i < sizeof(OWNERS) / sizeof(OWNERS[0]); i++) {
-    if (strcasecmp(OWNERS[i].mac, myMac) == 0) { owner = &OWNERS[i]; return; }
+    if (macMatches(OWNERS[i].mac, myMac)) { owner = &OWNERS[i]; return; }
   }
 }
 
@@ -86,30 +97,66 @@ struct Content {
   uint8_t px[MAX_COLS][8][3]; // [컬럼][행][RGB]
 } content;
 
+// 보드 내장 LED(빨강)를 0.5초 주기로 깜빡여 "펌웨어 살아있음"을 눈으로 보여준다.
+// 외부 LED 하네스와 전혀 무관한 신호라 배선 문제와 펌웨어 문제를 분리할 수 있다.
+// ★ 선물용 최종 빌드에서는 0으로 (완드에서 빨간 불이 깜빡이면 보기 싫으니까)
+#define DEBUG_BEACON 1
+
 uint8_t currentSlot = 0;
-int8_t testHold = -1;  // HW 검사용: -1=해제, 0=전체소등, 1=전체점등, 2=순차점등(체이스)
+// HW 검사용: -1=해제, 0=전체소등, 1=전체점등, 2=순차점등(체이스), 3=단일채널(testPin)
+int8_t testHold = -1;
+int8_t testPin = 0;    // testHold==3 일 때 켤 채널 (0~NUM_LEDS-1)
 uint32_t cfgDirtyAt = 0;  // 설정 변경 시각 — 플래시 저장은 1.5초 뒤로 미룸 (통신 중 즉시 쓰기 회피)
 
 // 이미지 수신 상태 (IMGB/IMGD/IMGE)
+// 주의: 멤버 기본값(NSDMI)을 넣지 말 것. 넣으면 aggregate가 아니게 되어
+// `imgRx = {}` 한 줄이 6KB 임시객체를 스택에 만든다 (BLE 수신 즉시 프리즈의 원인).
+// 전역이라 .bss에서 0으로 초기화되므로 기본값은 필요 없다.
 struct ImgRx {
-  bool active = false;
-  uint8_t slot = 0;
-  uint16_t cols = 0;
-  uint16_t received = 0;
-  uint16_t expectSeq = 0;
+  bool active;
+  uint8_t slot;
+  uint16_t cols;
+  uint16_t received;
+  uint16_t expectSeq;
   uint8_t buf[MAX_COLS * 24];
 } imgRx;
 
 // ---------------- 유틸 ----------------
 void reply(const char* s) {
-  Serial.print("[reply>] "); Serial.println(s);   // 어디서 어는지 추적용
-  bleuart.print(s);
-  Serial.println("[reply: body sent]");
-  bleuart.print("\n");
-  Serial.println("[reply: done]");
+  Serial.print("TX: "); Serial.println(s);
+  Serial.flush();   // USB CDC는 비동기 전송 — 폴트가 나면 버퍼에 남은 로그가 유실된다
+
+  char out[244];
+  int n = strlen(s);
+  if (n > (int)sizeof(out) - 2) n = sizeof(out) - 2;
+  memcpy(out, s, n);
+  out[n++] = '\n';   // 개행까지 한 덩어리로 (기존엔 notify 2번으로 쪼개져 나갔다)
+
+  // notify()는 한 번에 최대 _max_len(= 협상 가능한 최대 MTU, 여기선 23)까지만 보내고
+  // 나머지는 버린다. 그래서 긴 응답(INFO/LIST)은 MTU-3 단위로 직접 나눠 보낸다.
+  BLEConnection* conn = Bluefruit.Connection(Bluefruit.connHandle());
+  int chunk = conn ? (int)conn->getMtu() - 3 : 20;
+  if (chunk < 1) chunk = 20;
+
+  for (int i = 0; i < n; i += chunk) {
+    int len = n - i < chunk ? n - i : chunk;
+    // 주 방어선은 setupBle()의 hvn_qsize=8. 그래도 큐가 다 차면 코어는 빈 칸을
+    // 100ms(BLE_GENERIC_TIMEOUT)만 기다린 뒤 조용히 실패하고 그 패킷을 버린다.
+    // (큐 1칸이던 시절 실측: Windows 상대로 INFO 5패킷 중 2패킷 유실)
+    // write()는 실패 시 0을 돌려주므로 반환값을 보고 재시도한다 — 2차 방어선.
+    bool sent = false;
+    for (int retry = 0; retry < 12 && !sent; retry++) {
+      sent = (bleuart.write((const uint8_t*)out + i, len) == (size_t)len);
+      if (!sent) delay(20);
+    }
+    if (!sent) {
+      Serial.print("[tx] chunk dropped @"); Serial.println(i);
+      Serial.flush();
+    }
+  }
 }
 void replyf(const char* fmt, ...) {
-  char buf[120];
+  char buf[200];   // INFO 응답이 길다 (owner/serial/mac/color/leds). 잘리면 앱 파싱이 깨짐
   va_list ap; va_start(ap, fmt);
   vsnprintf(buf, sizeof(buf), fmt, ap);
   va_end(ap);
@@ -368,6 +415,7 @@ uint32_t crc32(const uint8_t* d, uint32_t len) {
 // ---------------- 프로토콜 파서 ----------------
 void handleLine(char* line) {
   Serial.print("RX: "); Serial.println(line);
+  Serial.flush();   // 여기까지 도달했는지를 확실히 눈으로 확인하기 위해
   char* cmd = strtok(line, " ");
   if (!cmd) return;
 
@@ -375,9 +423,12 @@ void handleLine(char* line) {
 
   if (strcmp(cmd, "INFO") == 0) {
     const char* m = cfg.mode == MODE_AUTO ? "auto" : cfg.mode == MODE_POV ? "pov" : "idle";
-    replyf("INFO fw=%s slots=%d used=%d bat=%d mode=%s bright=%d owner=%s serial=%s mac=%s",
+    // color/leds: 단색 완드의 실제 하드웨어를 앱에 알려 미리보기를 맞추기 위한 필드.
+    // 미등록 보드는 color=- 로 나가고 앱이 기본값으로 대체한다
+    replyf("INFO fw=%s slots=%d used=%d bat=%d mode=%s bright=%d owner=%s serial=%s mac=%s color=%s leds=%d",
            FW_VERSION, MAX_SLOTS, usedSlots(), readBattery(), m, cfg.bright,
-           owner ? owner->name : "-", owner ? owner->serial : "-", myMac);
+           owner ? owner->name : "-", owner ? owner->serial : "-", myMac,
+           owner ? owner->color : "-", NUM_LEDS);
     return;
   }
 
@@ -420,7 +471,10 @@ void handleLine(char* line) {
     uint16_t cols = atoi(strtok(nullptr, " ") ?: "0");
     if (n < 1 || n > MAX_SLOTS) { reply("ERR 2 slot out of range"); return; }
     if (cols < 1 || cols > MAX_COLS) { reply("ERR 2 bad cols"); return; }
-    imgRx = {};
+    // `imgRx = {}` 금지. ImgRx는 6KB짜리라 임시객체가 loop 태스크 스택(기본 6KB)을
+    // 통째로 날린다. 그 자리는 handleLine() 프롤로그에서 미리 잡히므로 명령 종류와
+    // 무관하게 "수신하는 순간" 하드폴트했다. 반드시 제자리(in-place) 초기화로.
+    memset(&imgRx, 0, sizeof(imgRx));
     imgRx.active = true; imgRx.slot = n; imgRx.cols = cols;
     reply("OK IMGB");
     return;
@@ -472,14 +526,56 @@ void handleLine(char* line) {
 
   // OTA(DFU) 명령은 보류 — 실기기 검증 후 재도입 예정 (기록: git 이력 참고)
 
-  // HW 브링업용 LED 테스트: TEST on(전체점등) / off(전체소등) / chase(순차) / end(해제)
+  // 배선 진단: PROBE [up|down] — 각 LED 핀의 전압을 mV로 회신
+  if (strcmp(cmd, "PROBE") == 0) {
+#if LED_TYPE == 3
+    char* m = strtok(nullptr, " ");
+    if (m && strcmp(m, "sweep") == 0) { probeSweep(); return; }
+    bool up = !(m && strcmp(m, "down") == 0);
+    probePins(up);
+#else
+    reply("ERR 1 PROBE is LED_TYPE 3 only");
+#endif
+    return;
+  }
+
+  // HW 브링업용 LED 테스트:
+  //   TEST on      전체 점등
+  //   TEST off     전체 소등(홀드)
+  //   TEST chase   1개씩 순차 점등 (전류 1/7 — 전원 여유 없을 때 확인용)
+  //   TEST pin <n> n번 채널만 계속 점등 (멀티미터 프로빙 / 죽은 채널 특정)
+  //   TEST drive low|high  GPIO 구동 세기 (S0S1 ~2mA / H0H1 ~9mA)
+  //     주의: SET BRIGHT는 LED_TYPE 3에서 아무 효과가 없다(digitalWrite 켜짐/꺼짐뿐).
+  //           단색 직결 LED의 실질적인 밝기 조절 수단은 이 구동 세기다.
+  //   TEST end     해제(일반 표시 복귀)
   if (strcmp(cmd, "TEST") == 0) {
     char* m = strtok(nullptr, " ");
-    if (!m) { reply("ERR 1 usage TEST on|off|chase|end"); return; }
+    if (!m) { reply("ERR 1 usage TEST on|off|chase|pin <n>|drive low|high|end"); return; }
     if (strcmp(m, "on") == 0) testHold = 1;
     else if (strcmp(m, "off") == 0) testHold = 0;
     else if (strcmp(m, "chase") == 0) testHold = 2;
     else if (strcmp(m, "end") == 0) testHold = -1;
+    else if (strcmp(m, "drive") == 0) {
+#if LED_TYPE == 3
+      char* d = strtok(nullptr, " ");
+      if (!d) { reply("ERR 1 usage TEST drive low|high"); return; }
+      if (strcmp(d, "low") == 0)  { setLedDrive(false); reply("OK TEST drive low");  return; }
+      if (strcmp(d, "high") == 0) { setLedDrive(true);  reply("OK TEST drive high"); return; }
+      reply("ERR 2 bad drive");
+      return;
+#else
+      reply("ERR 1 drive is LED_TYPE 3 only");
+      return;
+#endif
+    }
+    else if (strcmp(m, "pin") == 0) {
+      char* ns = strtok(nullptr, " ");
+      int n = ns ? atoi(ns) : -1;
+      if (n < 0 || n >= NUM_LEDS) { replyf("ERR 2 pin 0..%d", NUM_LEDS - 1); return; }
+      testPin = n; testHold = 3;
+      replyf("OK TEST pin %d", n);
+      return;
+    }
     else { reply("ERR 2 bad test mode"); return; }
     reply("OK TEST");
     return;
@@ -542,6 +638,111 @@ bool isSwinging() { return false; }       // TODO
 uint32_t swingPeriodUs() { return 20000; } // TODO: 스윙 주기 기반 컬럼 간격
 
 // ---------------- LED 출력 ----------------
+#if LED_TYPE == 3
+// nRF52840 GPIO 구동 세기. 기본 S0S1은 약 2mA로 LED가 어둡고, H0H1은 약 9mA.
+// 전원 여유를 의심할 때 low로 낮춰 전류를 1/4로 줄여볼 수 있다 (TEST drive low|high).
+void setLedDrive(bool high) {
+  for (int y = 0; y < NUM_LEDS; y++) {
+    uint32_t g = g_ADigitalPinMap[LED_PINS[y]];
+    NRF_GPIO_Type* port = g < 32 ? NRF_P0 : NRF_P1;
+    port->PIN_CNF[g & 31] = (port->PIN_CNF[g & 31] & ~GPIO_PIN_CNF_DRIVE_Msk)
+        | ((uint32_t)(high ? GPIO_PIN_CNF_DRIVE_H0H1 : GPIO_PIN_CNF_DRIVE_S0S1)
+           << GPIO_PIN_CNF_DRIVE_Pos);
+  }
+}
+#endif
+
+#if LED_TYPE == 3
+void restorePins();
+// nRF52840에서 ADC로 읽을 수 있는 핀인가 (AIN0~AIN7 = P0.02/03/04/05/28/29/30/31)
+bool isAnalogCapable(uint8_t d) {
+  uint32_t g = g_ADigitalPinMap[d];
+  return g == 2 || g == 3 || g == 4 || g == 5 || g == 28 || g == 29 || g == 30 || g == 31;
+}
+
+// 배선 진단 (멀티미터 없이 하는 도통·다이오드 시험).
+// 핀을 내부 풀 저항(약 13k) 입력으로 바꾼 뒤 SAADC로 패드 전압을 읽는다.
+// analogRead()는 PIN_CNF를 건드리지 않고 RESP_Bypass로 읽으므로 풀 설정이 그대로 유지된다.
+//
+// 풀업(PROBE 또는 PROBE up) 판독:
+//   ~3300mV  아무것도 달려있지 않음 = 단선/미연결
+//   ~1500~2400mV  LED가 GND 쪽으로 달려 있음 (미세전류에서의 순방향 강하)
+//   ~0mV     GND로 쇼트
+// 풀다운(PROBE down) 판독:
+//   ~0mV     정상(부하 없음 또는 GND 쪽 LED)
+//   높은 값  핀이 양전원 쪽에 물려 있음 (공통 애노드 배선 등)
+void probePins(bool pullup) {
+  analogReference(AR_INTERNAL);   // 0..3600mV
+  analogReadResolution(12);
+  for (int y = 0; y < NUM_LEDS; y++)
+    pinMode(LED_PINS[y], pullup ? INPUT_PULLUP : INPUT_PULLDOWN);
+  delay(30);                      // 풀 저항으로 패드가 안정될 시간
+
+  for (int y = 0; y < NUM_LEDS; y++) {
+    if (!isAnalogCapable(LED_PINS[y])) {
+      replyf("PROBE ch%d D%d n/a", y, LED_PINS[y]);
+    } else {
+      uint32_t acc = 0;
+      for (int k = 0; k < 4; k++) acc += analogRead(LED_PINS[y]);
+      uint32_t mv = (acc / 4) * 3600 / 4095;
+      replyf("PROBE ch%d D%d %lumV", y, LED_PINS[y], (unsigned long)mv);
+    }
+    delay(5);
+  }
+
+  restorePins();
+  replyf("OK PROBE %s", pullup ? "up" : "down");
+}
+
+// 진단으로 건드린 핀들을 원래 역할로 되돌린다
+void restorePins() {
+  for (int y = 0; y < NUM_LEDS; y++) {
+    pinMode(LED_PINS[y], OUTPUT);
+    digitalWrite(LED_PINS[y], LOW);
+  }
+  setLedDrive(true);
+  pinMode(PIN_BUTTON, INPUT_PULLUP);
+  pinMode(7, INPUT);
+  pinMode(8, INPUT);
+  pinMode(9, INPUT);
+  pinMode(LED_BLUE, INPUT);
+  pinMode(LED_GREEN, INPUT);
+#if DEBUG_BEACON
+  pinMode(LED_RED, OUTPUT);
+  digitalWrite(LED_RED, !LED_STATE_ON);
+#endif
+}
+
+// 전체 핀 훑기: LED가 D0~D6이 아닌 다른 핀에 붙어있는지 찾는다.
+// 내장 LED 핀(LED_RED/GREEN/BLUE)은 확실히 LED가 달려 있으므로 양성 대조군 역할을 한다.
+// 판독: up이 VDD에 가깝고 dn이 0이면 = 아무것도 안 달림.
+//       dn이 높게 뜨면 = 양전원 쪽 부하(저항 풀업이면 ~2.4V, 다이오드면 더 낮게 클램프)
+void probeSweep() {
+  analogReference(AR_INTERNAL);
+  analogReadResolution(12);
+  static const uint8_t PROBE_PINS[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+                                        LED_RED, LED_BLUE, LED_GREEN };
+  for (uint8_t i = 0; i < sizeof(PROBE_PINS); i++) {
+    uint8_t d = PROBE_PINS[i];
+    bool ana = isAnalogCapable(d);
+
+    pinMode(d, INPUT_PULLUP);
+    delay(15);
+    int up = ana ? (int)((uint32_t)analogRead(d) * 3600 / 4095) : (digitalRead(d) ? 1 : 0);
+
+    pinMode(d, INPUT_PULLDOWN);
+    delay(15);
+    int dn = ana ? (int)((uint32_t)analogRead(d) * 3600 / 4095) : (digitalRead(d) ? 1 : 0);
+
+    if (ana) replyf("SW D%d up=%dmV dn=%dmV", d, up, dn);
+    else     replyf("SW D%d up=%c dn=%c (no adc)", d, up ? 'H' : 'L', dn ? 'H' : 'L');
+    delay(5);
+  }
+  restorePins();
+  reply("OK PROBE sweep");
+}
+#endif
+
 void outputColumn(uint16_t col) {
 #if LED_TYPE == 3
   // 단색 직결: 픽셀에 색이 조금이라도 있으면 ON (색 정보는 무시, 켜짐/꺼짐만)
@@ -559,6 +760,18 @@ void outputColumn(uint16_t col) {
   strip.show();
 #endif
 }
+// 내장 LED 비콘. 보드 리비전마다 폴라리티가 달라서 토글로 처리 — 어느 쪽이든 깜빡인다
+void beaconTick() {
+#if DEBUG_BEACON
+  static uint32_t last = 0;
+  static bool on = false;
+  if (millis() - last < 500) return;
+  last = millis();
+  on = !on;
+  digitalWrite(LED_RED, on ? LED_STATE_ON : !LED_STATE_ON);
+#endif
+}
+
 void ledsOff() {
 #if LED_TYPE == 3
   for (int y = 0; y < NUM_LEDS; y++) digitalWrite(LED_PINS[y], LOW);
@@ -594,9 +807,14 @@ void idleGlow() {
 
 // ---------------- BLE 설정 ----------------
 void onBleConnect(uint16_t h) {
-  Serial.print("BLE connected, MTU=");
   BLEConnection* conn = Bluefruit.Connection(h);
-  Serial.println(conn ? conn->getMtu() : 0);
+  Serial.print("BLE connected, MTU=");
+  Serial.print(conn ? conn->getMtu() : 0);
+  // 실제 협상된 연결 인터벌(1.25ms 단위 → ms). 100ms를 넘으면 notify 재시도가 잦아진다
+  Serial.print(" connInterval=");
+  Serial.print(conn ? conn->getConnectionInterval() * 125 / 100 : 0);
+  Serial.println("ms");
+  Serial.flush();
 }
 void onBleDisconnect(uint16_t h, uint8_t reason) {
   // 주요 사유: 0x13 원격이 정상 종료, 0x08 신호 끊김(supervision timeout),
@@ -611,9 +829,21 @@ void bleRxCallback(uint16_t conn_hdl) {
 }
 
 void setupBle() {
+  // ★ begin() 앞에서만 유효. SoftDevice의 notify(HVN) 송신 큐를 1칸 → 8칸으로.
+  // 큐가 1칸이면 코어가 빈 칸을 100ms만 기다리고 조용히 포기해서(BLE_GENERIC_TIMEOUT)
+  // 연결 인터벌이 긴 중앙장치에선 긴 응답의 패킷이 격번으로 사라진다.
+  // MTU는 기본값 23 유지 — 큐 버퍼 하나가 23바이트뿐이라 8칸이어도 RAM 부담이 없고,
+  // 웹앱의 20바이트 청크 가정도 그대로 유지된다.
+  Bluefruit.configPrphConn(BLE_GATT_ATT_MTU_DEFAULT,     // mtu_max = 23
+                           6,                            // event_len 7.5ms (기본 3.75ms)
+                           8,                            // hvn_qsize (notify 큐) ← 핵심
+                           BLE_GATTC_WRITE_CMD_TX_QUEUE_SIZE_DEFAULT);
   Bluefruit.begin();
   // (주소 변조 핵 제거 — SoftDevice 가동 중 GAP 주소 변경이 수신 시 하드폴트 유발 의심)
   Bluefruit.setName("POV-STICK");
+  // 연결 인터벌 7.5~15ms 요청 (단위 1.25ms). 중앙장치가 긴 인터벌을 쓰면 notify
+  // 한 패킷마다 그만큼 걸려서 긴 응답이 느리고 유실 위험도 커진다 (위 reply 주석 참고)
+  Bluefruit.Periph.setConnInterval(6, 12);
   Bluefruit.Periph.setConnectCallback(onBleConnect);
   Bluefruit.Periph.setDisconnectCallback(onBleDisconnect);
   Bluefruit.setTxPower(4);
@@ -636,6 +866,10 @@ void setup() {
   // USB 시리얼이 붙을 때까지 최대 3초 대기 (모니터 열기 전에 부팅 로그가 지나가는 것 방지)
   for (uint32_t t0 = millis(); !Serial && millis() - t0 < 3000; ) delay(10);
   pinMode(PIN_BUTTON, INPUT_PULLUP);
+#if DEBUG_BEACON
+  pinMode(LED_RED, OUTPUT);
+  digitalWrite(LED_RED, !LED_STATE_ON);
+#endif
 #if USE_FS
   InternalFS.begin();
 #endif
@@ -644,12 +878,8 @@ void setup() {
   for (int y = 0; y < NUM_LEDS; y++) {
     pinMode(LED_PINS[y], OUTPUT);
     digitalWrite(LED_PINS[y], LOW);
-    // nRF52840 GPIO 고구동(H0H1, ~9mA) 설정 — 기본(2mA)은 LED가 어두움
-    uint32_t g = g_ADigitalPinMap[LED_PINS[y]];
-    NRF_GPIO_Type* port = g < 32 ? NRF_P0 : NRF_P1;
-    port->PIN_CNF[g & 31] = (port->PIN_CNF[g & 31] & ~GPIO_PIN_CNF_DRIVE_Msk)
-                            | (GPIO_PIN_CNF_DRIVE_H0H1 << GPIO_PIN_CNF_DRIVE_Pos);
   }
+  setLedDrive(true);   // 기본은 고구동(H0H1). TEST drive low 로 낮출 수 있다
 #elif LED_TYPE
   strip.begin();
   strip.show();
@@ -670,13 +900,22 @@ void setup() {
 }
 
 void loop() {
+  beaconTick();   // 내장 LED 깜빡임 = 펌웨어 생존 (외부 배선과 무관)
+
   // 디버그 하트비트: 루프 생존 + BLE 수신 FIFO 상태 (원인 확정 후 제거)
   static uint32_t hb = 0;
   if (millis() - hb > 5000) {
     hb = millis();
     Serial.print("[hb] up="); Serial.print(millis() / 1000);
     Serial.print("s conn="); Serial.print(Bluefruit.connected());
-    Serial.print(" rxAvail="); Serial.println(bleuart.available());
+    Serial.print(" rxAvail="); Serial.print(bleuart.available());
+#if defined(INCLUDE_uxTaskGetStackHighWaterMark) && INCLUDE_uxTaskGetStackHighWaterMark
+    // loop 태스크 스택 최저 잔량(워드). 코어 기본 스택은 1536워드(6KB)뿐이라
+    // 이 값이 100워드 밑으로 떨어지면 스택오버플로 위험 = 큰 지역변수를 의심할 것
+    Serial.print(" stackFreeWords="); Serial.print(uxTaskGetStackHighWaterMark(NULL));
+#endif
+    Serial.println();
+    Serial.flush();
     if (Bluefruit.connected()) bleuart.print("EV HB\n");  // 보드→폰 방향 테스트
   }
 
@@ -695,7 +934,9 @@ void loop() {
     static uint16_t chase = 0;
     chase++;
     for (int y = 0; y < NUM_LEDS; y++) {
-      bool on = testHold == 1 || (testHold == 2 && y == (chase / 15) % NUM_LEDS);
+      bool on = testHold == 1
+                || (testHold == 2 && y == (chase / 15) % NUM_LEDS)
+                || (testHold == 3 && y == testPin);
       digitalWrite(LED_PINS[y], on ? HIGH : LOW);
     }
     delay(20);
