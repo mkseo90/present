@@ -49,8 +49,21 @@ static const uint8_t LED_PINS[NUM_LEDS] = { 0, 1, 2, 3, 4, 5, 6 };
 #define MAX_COLS 256          // 콘텐츠 최대 컬럼(글자 32자 분량)
 #define IMG_MAX_BYTES (MAX_COLS * 3 * 8 / 8)  // 사용 안 함(자리표시)
 
+// ---------------- 보안 (LESC 페어링) ----------------
+// 1이면: 연결 직후 기기가 페어링을 요구하고(슬레이브 보안 요청), 암호화가 성립되기
+// 전에는 모든 명령을 ERR 8로 거절한다. nRF52840은 CryptoCell이 있어 이 코어의
+// 기본 페어링 파라미터가 이미 LESC(bond=1, mitm=0, lesc=1) — 즉 "LESC Just Works".
+//   - 얻는 것: 링크 암호화(도청 방지) + 본딩(재연결 시 자동 암호화) + 명령 게이트
+//   - 한계: Just Works라 MITM 방어는 없음 (패스키 표시 수단이 없는 HW의 물리적 한계.
+//           setPIN()은 레거시 페어링으로 다운그레이드되므로 사용하지 않는다)
+//   - 페어링 정보가 어긋나 연결이 계속 실패하면: 폰에서 기기 삭제 + CLRBOND 명령
+// ★ 웹앱(Android Chrome)/Bluefy(iOS) 호환은 실기기 검증 필요 — 문제시 0으로
+#define REQUIRE_PAIRING 1
+
 // ---------------- BLE ----------------
 BLEUart bleuart;
+volatile bool linkSecured = false;
+uint32_t pairReqAt = 0;   // 연결 후 이 시각에 페어링 요청 (0=예약 없음)
 // OTA(DFU)는 상시 서비스로 열지 않는다. "DFU <PIN>" 명령이 맞을 때만
 // 부트로더로 재부팅해 그 순간에만 무선 업데이트를 허용 (무단 리플래시 방지)
 
@@ -555,6 +568,15 @@ void handleLine(char* line) {
   char* cmd = strtok(line, " ");
   if (!cmd) return;
 
+#if REQUIRE_PAIRING
+  // 암호화(페어링) 전에는 명령을 받지 않는다. 오류 응답 자체는 열린 notify로
+  // 나가므로 앱이 "페어링 필요"를 알 수 있다
+  if (!linkSecured) {
+    reply("ERR 8 pairing required");
+    return;
+  }
+#endif
+
   if (strcmp(cmd, "PING") == 0) { reply("PONG"); return; }
 
   if (strcmp(cmd, "INFO") == 0) {
@@ -683,6 +705,13 @@ void handleLine(char* line) {
   if (strcmp(cmd, "CLROWNER") == 0) {
     clearOwner();
     reply("OK CLROWNER");
+    return;
+  }
+
+  // 본딩 정보 삭제 (페어링이 어긋나 재연결이 계속 실패할 때의 복구 수단)
+  if (strcmp(cmd, "CLRBOND") == 0) {
+    Bluefruit.Periph.clearBonds();
+    reply("OK CLRBOND reconnect_after_forget_on_phone");
     return;
   }
 
@@ -975,12 +1004,28 @@ void onBleConnect(uint16_t h) {
   Serial.print(conn ? conn->getConnectionInterval() * 125 / 100 : 0);
   Serial.println("ms");
   Serial.flush();
+#if REQUIRE_PAIRING
+  linkSecured = false;
+  // 연결 직후 바로 요청하면 일부 중앙장치가 거부하므로 잠시 뒤 loop에서 요청한다.
+  // 본딩된 상대라면 이 요청이 재암호화를 유발해 다이얼로그 없이 secured로 넘어간다
+  pairReqAt = millis() + 600;
+#endif
+}
+
+// 암호화 성립 시 호출 (LESC 페어링 완료 또는 본딩 재암호화)
+void onBleSecured(uint16_t h) {
+  linkSecured = true;
+  pairReqAt = 0;
+  Serial.println("BLE link secured (encrypted)");
+  Serial.flush();
 }
 void onBleDisconnect(uint16_t h, uint8_t reason) {
   // 주요 사유: 0x13 원격이 정상 종료, 0x08 신호 끊김(supervision timeout),
   // 0x3E 연결 수립 실패, 0x16 로컬 종료
   Serial.print("BLE disconnected, reason=0x");
   Serial.println(reason, HEX);
+  linkSecured = false;
+  pairReqAt = 0;
 }
 
 void bleRxCallback(uint16_t conn_hdl) {
@@ -1013,6 +1058,9 @@ void setupBle() {
   Bluefruit.Periph.setConnInterval(6, 12);
   Bluefruit.Periph.setConnectCallback(onBleConnect);
   Bluefruit.Periph.setDisconnectCallback(onBleDisconnect);
+#if REQUIRE_PAIRING
+  Bluefruit.Security.setSecuredCallback(onBleSecured);
+#endif
   Bluefruit.setTxPower(4);
   bleuart.begin();
   // setRxCallback 제거 — BLE 태스크 문맥에서 Serial 출력이 하드폴트 유발 의심.
@@ -1086,6 +1134,19 @@ void loop() {
   }
 
   pollBle();
+
+#if REQUIRE_PAIRING
+  // 연결 0.6초 후 페어링(암호화) 요청 — 본딩돼 있으면 조용히 재암호화된다
+  if (pairReqAt && millis() > pairReqAt) {
+    pairReqAt = 0;
+    BLEConnection* conn = Bluefruit.Connection(Bluefruit.connHandle());
+    if (conn && conn->connected() && !conn->secured()) {
+      Serial.println("[sec] requesting pairing");
+      Serial.flush();
+      conn->requestPairing();
+    }
+  }
+#endif
 
   // 미뤄둔 설정 저장 (마지막 변경 1.5초 후)
   if (cfgDirtyAt && millis() - cfgDirtyAt > 1500) {
