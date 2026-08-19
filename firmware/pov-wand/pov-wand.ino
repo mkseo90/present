@@ -54,21 +54,54 @@ BLEUart bleuart;
 // OTA(DFU)는 상시 서비스로 열지 않는다. "DFU <PIN>" 명령이 맞을 때만
 // 부트로더로 재부팅해 그 순간에만 무선 업데이트를 허용 (무단 리플래시 방지)
 
-// ---------------- 주인 지정 (MAC → 이름) ----------------
-// 실명·PIN 등 비공개 값은 secrets.h에 (공개 repo 제외, secrets.example.h 참고)
-#include "secrets.h"
-char myMac[18] = "?";
-const Owner* owner = nullptr;
+// ---------------- 주인 지정 ----------------
+// 주인 정보(이름·시리얼·LED색)는 **기기 플래시에 주입**한다 (SETOWNER 명령).
+// 실명을 소스에 두지 않으므로 공개 저장소에 사람 이름이 남지 않고, 새 PC에서
+// 파일을 옮겨 다닐 필요도 없다 — 보드가 자기 주인을 기억한다.
+//
+// secrets.h 는 선택사항이다. 있으면 MAC→주인 표를 대체 경로로 쓴다(과거 방식 호환).
+// 없어도 컴파일된다 → 새 클론에서 바로 빌드 가능.
+#if defined(__has_include)
+#  if __has_include("secrets.h")
+#    include "secrets.h"
+#    define HAS_SECRETS 1
+#  endif
+#endif
+#ifndef HAS_SECRETS
+#  define HAS_SECRETS 0
+#endif
 
+char myMac[18] = "?";
+
+// 런타임 주인 정보. INFO 응답과 부팅 크레딧이 이걸 본다
+struct OwnerRec {
+  char name[32];
+  char serial[24];
+  char color[8];     // RRGGBB
+  bool valid;
+} ownerRec;
+
+// 플래시 접근 함수는 아래 슬롯 저장 섹션에 있다 (아두이노 자동 프로토타입 순서 회피용 선언)
+bool loadOwner();
+bool saveOwner(const char* name, const char* serial, const char* color);
+void clearOwner();
+
+void setOwnerRec(const char* name, const char* serial, const char* color) {
+  snprintf(ownerRec.name,   sizeof(ownerRec.name),   "%s", name);
+  snprintf(ownerRec.serial, sizeof(ownerRec.serial), "%s", serial);
+  snprintf(ownerRec.color,  sizeof(ownerRec.color),  "%s", color);
+  ownerRec.valid = true;
+}
+
+#if HAS_SECRETS
 // OWNERS[].mac 은 전체 MAC이 아니어도 된다 — 뒷부분만 적어도 일치로 본다.
-// 예) 보드가 AA:BB:CC:DD:EE:FF 라면 "EE:FF", "DD:EE:FF", 전체 중 아무거나 가능.
-// 시리얼에 찍히는 형식에서 그대로 잘라 붙이면 되므로 콜론 단위로 끊는 것을 권장한다
-// (임의의 글자 수로 자르면 콜론에 걸려 헷갈린다).
+// 콜론 단위로 끊는 것을 권장 (시리얼 출력에서 그대로 잘라 붙일 수 있다).
 bool macMatches(const char* pattern, const char* mac) {
   size_t pl = strlen(pattern), ml = strlen(mac);
   if (pl < 2 || pl > ml) return false;   // 너무 짧으면 오인 위험 → 최소 2글자
   return strcasecmp(mac + (ml - pl), pattern) == 0;
 }
+#endif
 
 void findOwner() {
   uint8_t m[6];
@@ -77,9 +110,26 @@ void findOwner() {
            m[5], m[4], m[3], m[2], m[1], m[0]);
   Serial.print("MAC: "); Serial.println(myMac);
   Serial.flush();
-  for (uint8_t i = 0; i < sizeof(OWNERS) / sizeof(OWNERS[0]); i++) {
-    if (macMatches(OWNERS[i].mac, myMac)) { owner = &OWNERS[i]; return; }
+
+  // 1순위: 기기에 주입된 정보
+  if (loadOwner()) {
+    Serial.print("owner(flash): "); Serial.println(ownerRec.name);
+    Serial.flush();
+    return;
   }
+#if HAS_SECRETS
+  // 2순위: secrets.h 의 MAC→주인 표 (과거 방식)
+  for (uint8_t i = 0; i < sizeof(OWNERS) / sizeof(OWNERS[0]); i++) {
+    if (macMatches(OWNERS[i].mac, myMac)) {
+      setOwnerRec(OWNERS[i].name, OWNERS[i].serial, OWNERS[i].color);
+      Serial.println("owner(secrets.h)");
+      Serial.flush();
+      return;
+    }
+  }
+#endif
+  Serial.println("owner: none (SETOWNER 로 주입 가능)");
+  Serial.flush();
 }
 
 // ---------------- 상태 ----------------
@@ -287,6 +337,9 @@ void listSlots() { reply("OK LIST"); }
 uint8_t usedSlots() { return 0; }
 void saveConfig() {}
 void loadConfig() {}
+bool loadOwner() { return false; }
+bool saveOwner(const char*, const char*, const char*) { return false; }
+void clearOwner() {}
 #else
 // 파일 /s<N>: [type(1B: 'T'/'I')][colorspec\n(TXT)] payload
 void slotPath(char* out, uint8_t n) { sprintf(out, "/s%d", n); }
@@ -371,6 +424,47 @@ uint8_t usedSlots() {
   return used;
 }
 
+// 주인 정보 파일 /owner: "이름\n시리얼\n색\n" (사람이 읽을 수 있는 형식)
+bool saveOwner(const char* name, const char* serial, const char* color) {
+  InternalFS.remove("/owner");
+  File f(InternalFS);
+  if (!f.open("/owner", FILE_O_WRITE)) return false;
+  f.write((const uint8_t*)name, strlen(name));   f.write('\n');
+  f.write((const uint8_t*)serial, strlen(serial)); f.write('\n');
+  f.write((const uint8_t*)color, strlen(color)); f.write('\n');
+  f.close();
+  setOwnerRec(name, serial, color);
+  return true;
+}
+
+bool loadOwner() {
+  File f(InternalFS);
+  if (!f.open("/owner", FILE_O_READ)) return false;
+  char buf[80] = {0};
+  int n = f.read((uint8_t*)buf, sizeof(buf) - 1);
+  f.close();
+  if (n <= 0) return false;
+
+  // 줄 단위로 자른다 (이름 / 시리얼 / 색)
+  char* line[3] = { nullptr, nullptr, nullptr };
+  int li = 0;
+  char* p = buf;
+  line[li++] = p;
+  for (; *p && li < 3; p++) {
+    if (*p == '\n') { *p = 0; line[li++] = p + 1; }
+  }
+  for (; *p; p++) if (*p == '\n') { *p = 0; break; }   // 세 번째 줄 종료
+  if (li < 3 || !line[0][0]) return false;
+
+  setOwnerRec(line[0], line[1], line[2][0] ? line[2] : "-");
+  return true;
+}
+
+void clearOwner() {
+  InternalFS.remove("/owner");
+  ownerRec.valid = false;
+}
+
 void saveConfig() {
   InternalFS.remove("/cfg");
   File f(InternalFS);
@@ -427,8 +521,9 @@ void handleLine(char* line) {
     // 미등록 보드는 color=- 로 나가고 앱이 기본값으로 대체한다
     replyf("INFO fw=%s slots=%d used=%d bat=%d mode=%s bright=%d owner=%s serial=%s mac=%s color=%s leds=%d",
            FW_VERSION, MAX_SLOTS, usedSlots(), readBattery(), m, cfg.bright,
-           owner ? owner->name : "-", owner ? owner->serial : "-", myMac,
-           owner ? owner->color : "-", NUM_LEDS);
+           ownerRec.valid ? ownerRec.name   : "-",
+           ownerRec.valid ? ownerRec.serial : "-", myMac,
+           ownerRec.valid ? ownerRec.color  : "-", NUM_LEDS);
     return;
   }
 
@@ -525,6 +620,28 @@ void handleLine(char* line) {
   if (strcmp(cmd, "LIST") == 0) { listSlots(); return; }
 
   // OTA(DFU) 명령은 보류 — 실기기 검증 후 재도입 예정 (기록: git 이력 참고)
+
+  // 주인 주입: SETOWNER <이름> <시리얼> <색>  (예: SETOWNER 민경 No.001/001 00FF66)
+  // 실명을 소스에 두지 않기 위해 기기 플래시에 저장한다. 재부팅 후에도 유지된다.
+  // 세 인자 모두 공백을 포함할 수 없다 (INFO 응답이 공백으로 토큰을 나누므로)
+  if (strcmp(cmd, "SETOWNER") == 0) {
+    char* nm = strtok(nullptr, " ");
+    char* sr = strtok(nullptr, " ");
+    char* co = strtok(nullptr, " ");
+    if (!nm || !sr || !co) { reply("ERR 1 usage SETOWNER <name> <serial> <color>"); return; }
+    if (strlen(nm) > 31 || strlen(sr) > 23) { reply("ERR 2 name/serial too long"); return; }
+    ColorSpec probe;
+    if (strlen(co) != 6 || !hex2rgb(co, probe.a)) { reply("ERR 2 color must be RRGGBB"); return; }
+    if (!saveOwner(nm, sr, co)) { reply("ERR 3 storage unavailable"); return; }
+    reply("OK SETOWNER");
+    return;
+  }
+
+  if (strcmp(cmd, "CLROWNER") == 0) {
+    clearOwner();
+    reply("OK CLROWNER");
+    return;
+  }
 
   // 배선 진단: PROBE [up|down] — 각 LED 핀의 전압을 mV로 회신
   if (strcmp(cmd, "PROBE") == 0) {
@@ -886,10 +1003,10 @@ void setup() {
 #endif
   setupBle();
   findOwner();
-  if (owner) {
+  if (ownerRec.valid) {
     // 부팅 크레딧: 첫 스윙에 주인 이름이 뜬다. 버튼/BLE 조작 시 일반 콘텐츠로 전환
     char credit[80];
-    snprintf(credit, sizeof(credit), "%s의 선물 %s", owner->name, owner->serial);
+    snprintf(credit, sizeof(credit), "%s의 선물 %s", ownerRec.name, ownerRec.serial);
     ColorSpec cs; cs.type = ColorSpec::RAINBOW;
     renderText(credit, cs);
   } else if (!loadSlot(cfg.startSlot)) {

@@ -56,6 +56,23 @@ Nordic UART Service(NUS) 사용. BLE 상에 양방향 시리얼 통로를 만든
 - 이미지 포맷: 컬럼 우선, 컬럼당 8픽셀 × RGB 3바이트 = 24바이트. 예) 24컬럼 = 576바이트
 - `IMGB` 후 `IMGD` 순번이 어긋나면 `ERR 5`, 처음부터 재전송
 
+### 3.2.1 주인 정보 주입 (기기 프로비저닝)
+
+주인 이름·시리얼·LED색을 **기기 플래시에 저장**한다. 소스에 실명을 두지 않기 위한 것이며,
+`secrets.h` 없이 빌드한 펌웨어에서도 동작한다. 저장 위치는 LittleFS의 `/owner`.
+
+| 명령 | 동작 |
+|------|------|
+| `SETOWNER <이름> <시리얼> <색>` | 주입. 예) `SETOWNER 민경 No.001/001 00FF66` |
+| `CLROWNER` | 주입값 삭제 |
+
+- 세 인자 모두 **공백을 포함할 수 없다** (INFO 응답이 공백으로 토큰을 나누므로)
+- 이름 31바이트, 시리얼 23바이트 이내. 색은 `RRGGBB` 6자리 hex
+- 재부팅·재플래시(앱 영역만 덮는 DFU) 후에도 유지된다. 전체 칩 지우기를 하면 사라진다
+- 우선순위: **기기 주입값 > `secrets.h`의 `OWNERS[]` 표(있으면) > 없음(`owner=-`)**
+- 도구: `python firmware/tools/provision.py "이름" "No.001/001" 00FF66`
+  (`--show` 조회 / `--clear` 삭제)
+
 ### 3.3 설정
 
 | 명령 | 동작 |
@@ -72,7 +89,7 @@ Nordic UART Service(NUS) 사용. BLE 상에 양방향 시리얼 통로를 만든
 |------|---------|
 | `PING` | `PONG` |
 | `DFU <PIN>` | (v0.0.2에서 보류 — 실기기 검증 후 재도입 예정) |
-| `INFO` | `INFO fw=0.1 slots=12 used=5 bat=87 mode=auto bright=80 owner=주인공 serial=No.001/001 mac=C4:F3:...` |
+| `INFO` | `INFO fw=0.0.2 slots=12 used=5 bat=87 mode=auto bright=80 owner=주인공 serial=No.001/001 mac=AA:BB:... color=00FF66 leds=7` |
 
 ## 3.5 하드웨어 브링업 (앱은 사용하지 않음)
 
@@ -208,12 +225,22 @@ OK LIST
 
 ## 부록: 주인 지정
 
-펌웨어의 `OWNERS[]` 테이블(`secrets.h`, gitignore됨)에 보드 MAC 주소를 등록하면
-그 보드의 주인 이름·시리얼·LED 색이 정해진다. MAC은 부팅 시 시리얼 모니터에
-`MAC: AA:BB:CC:DD:EE:FF` 형태로 출력된다.
+주인 정보는 **기기 플래시에 주입**한다 (§3.2.1). 소스에 사람 실명을 두지 않으므로
+공개 저장소에 이름이 남지 않고, 새 PC로 옮길 때 파일을 들고 다닐 필요도 없다.
 
-**MAC은 전체를 적지 않아도 된다 — 뒷부분만 적으면 그것으로 일치를 판정한다**(최소 2글자).
-콜론 단위로 끊는 것을 권장한다 (시리얼 출력에서 그대로 잘라 붙일 수 있고 오타가 적다).
+```
+python firmware/tools/provision.py "이름" "No.001/001" 00FF66
+```
+
+주입된 보드는 부팅 크레딧으로 `<이름>의 선물 <시리얼>`을 표시하고,
+`INFO` 응답에 `owner=`/`serial=`/`color=`가 포함된다.
+
+### 과거 방식 (컴파일 시 매핑, 호환용)
+
+`secrets.h`(gitignore됨)의 `OWNERS[]` 표에 보드 MAC을 등록하는 방식도 계속 동작한다.
+**`secrets.h`는 선택사항이며 없어도 컴파일된다** (`__has_include`로 처리).
+MAC은 부팅 시 시리얼에 `MAC: AA:BB:CC:DD:EE:FF` 형태로 출력되고,
+**전체를 적지 않고 뒷부분만 적어도 일치로 판정한다**(최소 2글자, 콜론 단위 권장).
 
 ```c
 struct Owner { const char* mac; const char* name; const char* serial; const char* color; };
@@ -222,9 +249,7 @@ static const Owner OWNERS[] = {
 };
 ```
 
-등록된 보드는 부팅 크레딧으로 `<이름>의 선물 <시리얼>`을 표시하고,
-`INFO` 응답에 `owner=`/`serial=`/`mac=`/`color=`가 포함된다.
-이름에는 공백을 넣지 않는다 (INFO가 공백 구분이므로).
+기기에 주입된 값이 있으면 이 표보다 **주입값이 우선**한다.
 
 ## 변경 이력
 

@@ -125,9 +125,14 @@ SoftDevice의 HVN(notify) 송신 큐가 기본 **1칸**이고, 코어는 빈 칸
 
 ## 다음 단계
 
-1. **`secrets.h`에 실제 값 채우기.** 지금은 `secrets.example.h` 복사본(플레이스홀더)이라
-   `OWNERS` MAC이 `00:00:...`이고, 그래서 부팅 크레딧 대신 `HELLO`가 뜬다.
-   부팅 시 시리얼에 찍히는 MAC(예: `AA:BB:CC:DD:EE:FF`)과 이름·시리얼을 넣고 다시 빌드할 것.
+1. **주인 정보 주입.** 소스가 아니라 기기 플래시에 넣는다 (`secrets.h` 불필요):
+
+   ```
+   python firmware/tools/provision.py "실제이름" "No.001/001" 00FF66
+   ```
+
+   현재 이 보드에는 테스트값(`테스트`)이 주입되어 있으니 실제 이름으로 덮어쓸 것.
+   조회 `--show`, 삭제 `--clear`. 재부팅·재플래시 후에도 유지된다.
 2. **실물 LED 조립 검증** — LED 7개를 붙인 상태에서 `TEST on` / `TEST chase`로 채널별 확인,
    그 다음 `SET MODE pov` + 흔들어 잔상 확인. 밝기·컬럼 간격 튜닝.
 3. **IMU 스윙 감지 구현** — `isSwinging()`/`swingPeriodUs()`가 아직 스텁(각각 false/20000
@@ -239,9 +244,8 @@ GPIO 전환을 멈추면(`TEST off`) 소리가 멎는 것으로 확인됨. 부�
 ~/tools/arduino-cli/arduino-cli.exe board list
 ```
 
-**주의**: 현재 `secrets.h`는 `secrets.example.h`를 그대로 복사한 **플레이스홀더**다
-(`OWNERS` MAC이 `00:00:...`). 선물용 실물을 구울 때는 부팅 시 시리얼에 찍히는 실제 MAC과
-이름·시리얼을 채운 뒤 다시 빌드할 것. 지금 `build/`에 있는 zip은 테스트 빌드다.
+**주인 정보는 빌드와 무관하다** — 기기 플래시에 주입하므로 같은 바이너리를 모든 보드에
+구운 뒤 보드별로 `provision.py`만 돌리면 된다. 실명이 소스·바이너리에 들어가지 않는다.
 
 ### 처음부터 세팅할 때 (다른 PC)
 
@@ -251,7 +255,9 @@ GPIO 전환을 멈추면(`TEST off`) 소리가 멎는 것으로 확인됨. 부�
    `https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json`
 3. `arduino-cli core update-index` → `arduino-cli core install Seeeduino:nrf52@1.1.13`
    (**mbed 아닌 것**. arm-gcc 146MB + CMSIS 99MB 포함, 총 약 270MB)
-4. `firmware/pov-wand/secrets.example.h`를 `secrets.h`로 복사 (gitignore된 파일)
+4. `secrets.h`는 **필요 없다** — 없어도 컴파일된다(`__has_include`). 주인 정보는
+   `provision.py`로 기기에 주입한다. (과거 방식으로 쓰려면 `secrets.example.h`를
+   `secrets.h`로 복사해 채우면 되고, 기기 주입값이 있으면 그쪽이 우선한다)
 5. FQBN: `Seeeduino:nrf52:xiaonRF52840Sense`
 6. 라이브러리: Adafruit NeoPixel (LED_TYPE 2용, 지금은 불필요)
 
