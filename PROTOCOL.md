@@ -71,6 +71,7 @@ Nordic UART Service(NUS) 사용. BLE 상에 양방향 시리얼 통로를 만든
 | 명령 | 응답 예 |
 |------|---------|
 | `PING` | `PONG` |
+| `DFU <PIN>` | `OK DFU` 후 부트로더로 재부팅 → 그 상태에서만 nRF Connect로 OTA 가능. PIN은 secrets.h |
 | `INFO` | `INFO fw=0.1 slots=12 used=5 bat=87 mode=auto bright=80 owner=주인공 serial=No.001/001 mac=C4:F3:...` |
 
 ## 4. 응답 (기기 → 앱)
@@ -96,6 +97,7 @@ OK LIST
 | 4 | CRC 불일치 |
 | 5 | 이미지 청크 순번 오류 |
 | 6 | 텍스트에 폰트 없는 문자 포함 (해당 문자는 □로 대체 후 경고) |
+| 7 | DFU PIN 불일치 |
 
 ## 5. 색 지정
 
