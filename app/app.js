@@ -283,18 +283,10 @@ function renderPreview() {
   updatePreviewLabel(truncated);
 }
 
-// 색 이름을 알아보기 쉽게. 모르는 색은 hex 그대로 보여준다
-const COLOR_NAMES = {
-  "00FF66": "GREEN", "3399FF": "BLUE", "FF4FA0": "PINK",
-  "FFD644": "YELLOW", "FFFFFF": "WHITE", "FF3B30": "RED",
-};
-function monoColorLabel() {
-  const c = state.monoColor;
-  return (COLOR_NAMES[c] || "#" + c) + " 완드";
-}
+// 완드 색은 미리보기 도트 색으로 이미 보이므로 라벨에 따로 적지 않는다.
+// 기기 한도를 넘겨 잘릴 때만 경고를 덧붙인다
 function updatePreviewLabel(truncated) {
   const parts = ["잔상 미리보기"];
-  if (state.mono) parts.push(monoColorLabel());
   if (truncated) parts.push("기기 한도 초과 — 뒷부분 잘림");
   document.querySelector(".preview-label").textContent = parts.join(" · ");
 }
@@ -313,11 +305,9 @@ function hex2rgb(h) {
 }
 
 // ---------- 프리셋 (앱 로컬 저장 — 송별 메시지 등) ----------
+// 기본 예시 없이 빈 목록에서 시작. 사용자가 "+ 추가"로 직접 채운다
 function getPresets() {
-  return JSON.parse(localStorage.getItem("presets") || JSON.stringify([
-    { color: "rainbow", text: "그동안 감사했습니다" },
-    { color: "FFD644", text: "새 출발을 응원해요" },
-  ]));
+  return JSON.parse(localStorage.getItem("presets") || "[]");
 }
 function setPresets(p) { localStorage.setItem("presets", JSON.stringify(p)); renderPresets(); }
 function renderPresets() {
