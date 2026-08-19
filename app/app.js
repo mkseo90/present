@@ -5,6 +5,10 @@ const NUS_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // 앱→기기 write
 const NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // 기기→앱 notify
 
+// 기기가 color=/leds= 를 알려주지 않을 때 쓰는 기본값 (현재 선물용 완드 기준)
+const DEFAULT_MONO_COLOR = "00FF66";
+const DEFAULT_LED_COUNT = 7;
+
 const $ = (id) => document.getElementById(id);
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -15,6 +19,11 @@ const state = {
   rxChar: null,
   sim: false,
   color: "FF4FA0",
+  // 현재 하드웨어는 단색 완드다 → 색상 선택 UI를 기본으로 숨긴다.
+  // 3색 LED 완드(fw 1.0.0 이상)가 붙으면 INFO를 보고 자동으로 살아난다
+  mono: true,
+  monoColor: DEFAULT_MONO_COLOR,   // 단색 완드의 실제 LED 색 (INFO의 color= 로 갱신)
+  ledCount: DEFAULT_LED_COUNT,     // 완드의 LED 개수 (INFO의 leds= 로 갱신)
   slots: [], // {n, type, preview, selected}
   pending: [], // 응답 대기 콜백
 };
@@ -38,6 +47,11 @@ const sim = {
       case "PING": return reply("PONG");
       case "INFO": return reply(`INFO fw=sim slots=12 used=${this.slots.length} bat=100 mode=auto bright=80 owner=주인공 serial=No.001/001 mac=SIM`);
       case "SHOW": return reply("OK SHOW");
+      case "SHOWSLOT": {
+        const n = parseInt(args[0]);
+        if (!this.slots.some((s) => s.n === n)) return reply("ERR 2 empty slot");
+        return reply("OK SHOWSLOT");
+      }
       case "SAVE": {
         const n = parseInt(args[0]);
         if (!(n >= 1 && n <= 12)) return reply("ERR 2 slot out of range");
@@ -70,9 +84,10 @@ async function sendLine(line) {
   if (state.sim) return sim.handle(line);
   if (!state.rxChar) { toastConnectNeeded(); throw new Error("not connected"); }
   const bytes = enc.encode(line + "\n");
-  // MTU 대비 청크 write (Web Bluetooth는 512B까지지만 보수적으로)
-  for (let i = 0; i < bytes.length; i += 180) {
-    await state.rxChar.writeValueWithoutResponse(bytes.slice(i, i + 180));
+  // 기기 MTU는 기본 23 (= ATT 페이로드 20B). 펌웨어가 MTU를 키우지 않으므로
+  // 20바이트씩 나눠 쓴다. 펌웨어는 바이트 단위로 재조립하니 UTF-8 중간이 갈려도 무해.
+  for (let i = 0; i < bytes.length; i += 20) {
+    await state.rxChar.writeValueWithoutResponse(bytes.slice(i, i + 20));
   }
 }
 
@@ -104,6 +119,14 @@ function onLine(line) {
     $("infBat").textContent = (kv.bat || "-") + "%";
     $("infOwner").textContent = kv.owner && kv.owner !== "-"
       ? `${kv.owner} (${kv.serial || ""})` : "-";
+    // 기기가 알려준 실제 하드웨어 사양을 반영 (보드마다 LED 색·개수가 다르다)
+    // color= 를 주지 않는 기기(미등록 보드·시뮬레이터)에 붙었을 땐 이전 기기의 색을
+    // 그대로 물고 있으면 안 되므로 기본값으로 되돌린다
+    state.monoColor = (kv.color && /^[0-9A-Fa-f]{6}$/.test(kv.color))
+      ? kv.color.toUpperCase()
+      : DEFAULT_MONO_COLOR;
+    const n = parseInt(kv.leds);
+    state.ledCount = (n >= 1 && n <= 8) ? n : DEFAULT_LED_COUNT;
     setMonoUI(!fwIsRgb(kv.fw));
     if (kv.bright) { $("bright").value = kv.bright; $("brightVal").textContent = kv.bright + "%"; }
     if (kv.mode) setSegUI(kv.mode);
@@ -142,7 +165,7 @@ function onDisconnected() {
   state.device = null;
   state.rxChar = null;
   setConnUI(false);
-  setMonoUI(false); // 연결 해제 시 기본(풀컬러) UI로 복귀
+  setMonoUI(true);  // 연결 해제 시에도 단색 UI 유지 (현재 하드웨어가 단색이므로)
 }
 function setConnUI(on, name) {
   const btn = $("btnConnect");
@@ -155,23 +178,24 @@ function toastConnectNeeded() {
 }
 
 // ---------- 펌웨어 버전 → UI 모드 ----------
-// fw 1.0.0 이상 = RGB 완드(풀컬러 UI), 미만 = GREEN 단색 완드(색 선택 숨김)
+// fw 1.0.0 이상 = RGB 완드(풀컬러 UI), 미만 = 단색 완드(색 선택 숨김)
+// 판별 불가(시뮬레이터 fw=sim 등)는 **단색**으로 본다 — 현재 존재하는 하드웨어가
+// 전부 단색이라, 못 쓰는 색 선택 UI를 보여주는 것이 더 혼란스럽다.
+// 3색 LED 완드를 만들면 그 펌웨어의 FW_VERSION을 1.0.0 이상으로 올리면 자동 전환된다.
 function fwIsRgb(fw) {
   const v = (fw || "").split(".").map(Number);
-  if (v.length < 3 || v.some(isNaN)) return true; // 시뮬레이터 등 판별 불가 → 풀 UI
+  if (v.length < 3 || v.some(isNaN)) return false;
   return v[0] >= 1;
 }
 function setMonoUI(mono) {
   state.mono = mono;
   document.body.classList.toggle("mono", mono);
-  document.querySelector(".preview-label").textContent =
-    mono ? "잔상 미리보기 · GREEN 완드" : "잔상 미리보기";
-  renderPreview();
+  renderPreview();   // 라벨 갱신은 renderPreview가 담당 (잘림 표시와 합쳐야 하므로)
 }
 
 // ---------- 색 ----------
 function currentColorSpec() {
-  if (state.mono) return "00FF66";
+  if (state.mono) return state.monoColor;   // 그 보드에 실제로 달린 LED 색
   if (state.color === "rainbow") return "rainbow";
   if (state.color === "grad") {
     const a = $("gradA").value.slice(1).toUpperCase();
@@ -181,39 +205,98 @@ function currentColorSpec() {
   return state.color;
 }
 
-// ---------- 미리보기 (텍스트 → 8px 도트) ----------
+// ---------- 미리보기 (펌웨어와 동일한 8x8 비트맵 폰트) ----------
+// 이전에는 캔버스에 시스템 폰트를 8px로 그려 알파 임계값으로 잘라냈는데,
+// Galmuri7이 앱에 없어 Malgun Gothic으로 폴백되면서 한글이 뭉개졌고
+// 폰트를 넣어도 캔버스 래스터화라 기기 출력과 달랐다.
+// 이제 font8x8.js(= 펌웨어 font8x8.h/font8x8_kr.h와 같은 테이블)를 직접 읽어
+// 미리보기가 기기 출력과 픽셀 단위로 일치한다.
+
+const MAX_COLS = 256;   // 펌웨어 MAX_COLS와 반드시 같아야 함
+
+// 펌웨어 glyphFor()와 동일 규칙. 폰트에 없는 문자는 ▯
+function glyphFor(cp) {
+  const g = new Uint8Array(8);
+  if (cp >= 0x20 && cp < 0x7F && window.FONT8) {
+    g.set(window.FONT8.subarray((cp - 0x20) * 8, (cp - 0x20) * 8 + 8));
+  } else if (cp >= 0xAC00 && cp <= 0xD7A3 && window.FONT8_KR) {
+    g.set(window.FONT8_KR.subarray((cp - 0xAC00) * 8, (cp - 0xAC00) * 8 + 8));
+  } else {
+    g.fill(0x81); g[0] = 0xFF; g[7] = 0xFF;
+  }
+  return g;
+}
+
+// 펌웨어 renderText()와 동일: 글자당 8컬럼 + 간격 1컬럼, MAX_COLS에서 잘림
+function textToColumns(text) {
+  const cols = [];
+  let truncated = false;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0);
+    if (cp < 0x20) continue;
+    if (cols.length >= MAX_COLS - 9) { truncated = true; break; }
+    const g = glyphFor(cp);
+    for (let gx = 0; gx < 8; gx++) cols.push(g[gx]);
+    cols.push(0);
+  }
+  return { cols, truncated };
+}
+
+// 색 보간에 쓰는 전체 폭도 펌웨어와 같은 방식으로 계산
+function colorWidth(text) {
+  let total = 0;
+  for (const _ of text) {
+    if (total >= MAX_COLS) break;
+    total += 9;
+  }
+  return total || 9;
+}
+
 function renderPreview() {
   const text = $("sendText").value || "안녕";
-  const off = document.createElement("canvas");
-  const H = state.mono ? 7 : 8; // GREEN 완드는 LED 7개
-  const octx = off.getContext("2d", { willReadFrequently: true });
-  octx.font = "8px Galmuri7, 'Malgun Gothic', sans-serif";
-  const W = Math.max(8, Math.ceil(octx.measureText(text).width) + 2);
-  off.width = W; off.height = H;
-  const o2 = off.getContext("2d", { willReadFrequently: true });
-  o2.font = "8px Galmuri7, 'Malgun Gothic', sans-serif";
-  o2.fillStyle = "#fff";
-  o2.textBaseline = "top";
-  o2.fillText(text, 1, 0);
-  const img = o2.getImageData(0, 0, W, H).data;
+  // 단색 완드는 기기가 알려준 LED 개수만큼만 (bit0부터). RGB 완드는 8행 전체
+  const H = state.mono ? state.ledCount : 8;
+  const { cols, truncated } = textToColumns(text);
+  const total = colorWidth(text);
 
+  // backing store를 컬럼 수에 맞춰 잡고 CSS(width:100%)가 축소하게 둔다.
+  // 그래야 긴 문구도 잘리지 않고, image-rendering:pixelated로 도트가 선명하다
+  const dot = 6;
   const cv = $("preview");
+  cv.width = Math.max(8, cols.length) * dot;
+  cv.height = H * dot + 8;
+
   const ctx = cv.getContext("2d");
-  const dot = Math.max(2, Math.floor(cv.width / W));
-  cv.height = dot * H + 8;
   ctx.fillStyle = "#0B0A12";
   ctx.fillRect(0, 0, cv.width, cv.height);
+
   const spec = currentColorSpec();
-  for (let x = 0; x < W; x++) {
+  for (let x = 0; x < cols.length; x++) {
     for (let y = 0; y < H; y++) {
-      if (img[(y * W + x) * 4 + 3] > 100) {
-        ctx.fillStyle = pixelColor(spec, x, W);
-        ctx.beginPath();
-        ctx.arc(x * dot + dot / 2, y * dot + dot / 2 + 4, dot * 0.42, 0, 7);
-        ctx.fill();
-      }
+      if (!((cols[x] >> y) & 1)) continue;
+      ctx.fillStyle = pixelColor(spec, x, total);
+      ctx.beginPath();
+      ctx.arc(x * dot + dot / 2, y * dot + dot / 2 + 4, dot * 0.42, 0, 7);
+      ctx.fill();
     }
   }
+  updatePreviewLabel(truncated);
+}
+
+// 색 이름을 알아보기 쉽게. 모르는 색은 hex 그대로 보여준다
+const COLOR_NAMES = {
+  "00FF66": "GREEN", "3399FF": "BLUE", "FF4FA0": "PINK",
+  "FFD644": "YELLOW", "FFFFFF": "WHITE", "FF3B30": "RED",
+};
+function monoColorLabel() {
+  const c = state.monoColor;
+  return (COLOR_NAMES[c] || "#" + c) + " 완드";
+}
+function updatePreviewLabel(truncated) {
+  const parts = ["잔상 미리보기"];
+  if (state.mono) parts.push(monoColorLabel());
+  if (truncated) parts.push("기기 한도 초과 — 뒷부분 잘림");
+  document.querySelector(".preview-label").textContent = parts.join(" · ");
 }
 function pixelColor(spec, x, w) {
   if (spec === "rainbow") return `hsl(${Math.round((x / w) * 300)} 95% 62%)`;
@@ -399,4 +482,4 @@ if (!("bluetooth" in navigator)) {
 }
 
 renderPresets();
-renderPreview();
+setMonoUI(true);   // 기본 = 단색 완드 UI. 내부에서 renderPreview()까지 수행
