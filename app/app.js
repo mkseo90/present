@@ -114,6 +114,11 @@ function onLine(line) {
     // INFO fw=.. slots=.. used=.. bat=.. mode=.. bright=..
   }
   if (head === "INFO") {
+    // 페어링 재시도 중이었다면 성공 — 대기 종료, 슬롯 목록 이어서 조회
+    if (state.pairWait) {
+      state.pairWait = 0;
+      refreshSlots();
+    }
     const kv = Object.fromEntries(rest.map((t) => t.split("=")));
     $("infFw").textContent = kv.fw || "-";
     $("infBat").textContent = (kv.bat || "-") + "%";
@@ -131,7 +136,20 @@ function onLine(line) {
     if (kv.bright) { $("bright").value = kv.bright; $("brightVal").textContent = kv.bright + "%"; }
     if (kv.mode) setSegUI(kv.mode);
   }
-  if (head === "ERR") alert("기기 오류: " + line);
+  if (head === "ERR") {
+    // ERR 8 = 기기가 페어링(암호화)을 기다리는 중. 폰의 페어링 다이얼로그를
+    // 사용자가 수락할 때까지 조용히 INFO를 재시도한다 (최대 ~15초)
+    if (rest[0] === "8") {
+      if ((state.pairWait || 0) < 10) {
+        state.pairWait = (state.pairWait || 0) + 1;
+        setTimeout(() => {
+          if (state.device) sendLine("INFO").catch(() => {});
+        }, 1500);
+      }
+      return;
+    }
+    alert("기기 오류: " + line);
+  }
 }
 
 // ---------- BLE 연결 ----------
@@ -151,7 +169,11 @@ async function connect() {
     tx.addEventListener("characteristicvaluechanged", onNotify);
     state.device = device;
     setConnUI(true, device.name || "POV-STICK");
+    state.pairWait = 0;
     await sendLine("INFO");
+    // 슬롯 목록은 INFO 성공(=페어링 완료) 후 onLine에서 이어서 조회하지 않고
+    // 여기서도 한 번 시도한다 — 페어링이 불필요한 펌웨어(REQUIRE_PAIRING 0)와의 호환용.
+    // ERR 8이면 위 onLine 로직이 알아서 재시도 흐름으로 넘어간다
     refreshSlots();
   } catch (err) {
     if (err.name !== "NotFoundError") alert("연결 실패: " + err.message);
