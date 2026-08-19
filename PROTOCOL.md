@@ -71,7 +71,7 @@ Nordic UART Service(NUS) 사용. BLE 상에 양방향 시리얼 통로를 만든
 | 명령 | 응답 예 |
 |------|---------|
 | `PING` | `PONG` |
-| `DFU <PIN>` | `OK DFU` 후 부트로더로 재부팅 → 그 상태에서만 nRF Connect로 OTA 가능. PIN은 secrets.h |
+| `DFU <PIN>` | (v0.0.2에서 보류 — 실기기 검증 후 재도입 예정) |
 | `INFO` | `INFO fw=0.1 slots=12 used=5 bat=87 mode=auto bright=80 owner=주인공 serial=No.001/001 mac=C4:F3:...` |
 
 ## 4. 응답 (기기 → 앱)

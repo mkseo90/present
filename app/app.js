@@ -185,7 +185,7 @@ function currentColorSpec() {
 function renderPreview() {
   const text = $("sendText").value || "안녕";
   const off = document.createElement("canvas");
-  const H = 8;
+  const H = state.mono ? 7 : 8; // GREEN 완드는 LED 7개
   const octx = off.getContext("2d", { willReadFrequently: true });
   octx.font = "8px Galmuri7, 'Malgun Gothic', sans-serif";
   const W = Math.max(8, Math.ceil(octx.measureText(text).width) + 2);
