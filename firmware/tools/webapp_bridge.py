@@ -30,11 +30,10 @@ import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 import websockets
-from bleak import BleakScanner, BleakClient
+from bleak import BleakClient
 
-DEVICE_NAME = "POV-STICK"
-RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
-TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+from povble import RX_UUID, TX_UUID, find_wand
+
 HTTP_PORT = 8765
 WS_PORT = 8766
 
@@ -164,10 +163,10 @@ async def ws_handler(ws):
             kind = msg.get("t")
 
             if kind == "connect":
-                dev = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=20.0)
+                # 광고 이름이 주인마다 다르므로 서비스 UUID로 찾는다
+                dev = await find_wand()
                 if dev is None:
-                    await ws.send(json.dumps({"t": "error",
-                                              "msg": "%s 를 못 찾음" % DEVICE_NAME}))
+                    await ws.send(json.dumps({"t": "error", "msg": "완드를 못 찾음"}))
                     continue
                 client = BleakClient(dev)
                 await client.connect()
@@ -180,7 +179,8 @@ async def ws_handler(ws):
                     print("   기기->앱 %r" % bytes(data), flush=True)
 
                 await client.start_notify(TX_UUID, cb)
-                await ws.send(json.dumps({"t": "connected", "name": dev.name,
+                await ws.send(json.dumps({"t": "connected",
+                                          "name": dev.name or "POV-STICK",
                                           "address": dev.address}))
                 print("[ble] 연결: %s" % dev.address, flush=True)
 

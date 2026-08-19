@@ -1,3 +1,6 @@
 firmware/pov-wand/secrets.h
 firmware/pov-wand/build/
 docs/
+__pycache__/
+*.pyc
+.venv/

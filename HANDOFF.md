@@ -131,8 +131,12 @@ SoftDevice의 HVN(notify) 송신 큐가 기본 **1칸**이고, 코어는 빈 칸
    python firmware/tools/provision.py "실제이름" "No.001/001" 00FF66
    ```
 
-   현재 이 보드에는 테스트값(`테스트`)이 주입되어 있으니 실제 이름으로 덮어쓸 것.
-   조회 `--show`, 삭제 `--clear`. 재부팅·재플래시 후에도 유지된다.
+   조회 `--show`, 삭제 `--clear`, 켜져 있는 완드 목록 `--list`.
+   재부팅·재플래시 후에도 유지된다.
+
+   **주인 이름은 BLE 광고 이름에도 쓰인다** — `<이름>의 LED`. 완드를 여러 개 켰을 때
+   구분하기 위한 것이며, 광고 데이터는 부팅 시 구성되므로 **재부팅 후 적용**된다.
+   현재 이 보드에는 `민경`이 주입되어 `민경의 LED`로 광고 중이다.
 2. **실물 LED 조립 검증** — LED 7개를 붙인 상태에서 `TEST on` / `TEST chase`로 채널별 확인,
    그 다음 `SET MODE pov` + 흔들어 잔상 확인. 밝기·컬럼 간격 튜닝.
 3. **IMU 스윙 감지 구현** — `isSwinging()`/`swingPeriodUs()`가 아직 스텁(각각 false/20000
@@ -294,7 +298,9 @@ python firmware/tools/ble_selftest.py clean    # 테스트 슬롯 정리
 
 ### B. nRF Connect 앱에서
 
-1. 스캔 → `POV-STICK` 연결 (최소 스케치는 `POV-TEST`)
+1. 스캔 → **`<주인이름>의 LED`** 연결 (주인 미주입 보드는 `POV-STICK`,
+   최소 스케치는 `POV-TEST`). 광고 이름은 주인마다 다르므로 이름을 외우지 말고
+   Nordic UART Service를 광고하는 기기를 고르면 된다
 2. Nordic UART Service → TX(…6E400003…) ↓↓↓ 눌러 notify 구독
 3. RX(…6E400002…)에 TEXT로 `PING` 전송 (줄바꿈 불필요 — 150ms 유휴 시 줄 완성 처리 있음)
 4. 정상 기준: 시리얼에 `RX: PING` + `TX: PONG`, 폰에 `PONG`, [hb] 하트비트 지속,

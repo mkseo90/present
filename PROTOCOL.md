@@ -13,14 +13,31 @@ Nordic UART Service(NUS) 사용. BLE 상에 양방향 시리얼 통로를 만든
 
 | 항목 | 값 |
 |------|-----|
-| 광고 이름 | `POV-STICK` |
+| 광고 이름 | `<주인이름>의 LED` (주인 미주입 시 `POV-STICK`) — 아래 참고 |
 | Service UUID | `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` |
 | RX Characteristic (앱→기기, Write) | `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` |
 | TX Characteristic (기기→앱, Notify) | `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` |
 
-- 펌웨어: Bluefruit 라이브러리 `BLEUart` 사용, MTU 247 협상 (`Bluefruit.configPrphConn(247)`)
-- 앱: Web Bluetooth. 한 번의 write는 512바이트 이하로 유지
+- 펌웨어: Bluefruit 라이브러리 `BLEUart` 사용. **MTU는 기본값 23 유지**
+  (한 번에 보낼 수 있는 ATT 페이로드 20바이트). notify 송신 큐는 `hvn_qsize=8`로 확장
+- 앱: Web Bluetooth. **한 번의 write는 20바이트 이하로 유지** (MTU 23 제약)
 - 페어링/본딩 없음 (장난감이므로 Just Works, 암호화 생략)
+
+### 광고 이름은 기기마다 다르다
+
+완드를 여러 개 동시에 켰을 때 기기 선택창에서 구분되도록, 주인 이름을 광고 이름에 쓴다.
+
+| 상태 | 광고 이름 |
+|------|-----------|
+| 주인 주입됨 (§3.2.1) | `<주인이름>의 LED` (예: `민경의 LED`) |
+| 미주입 (새 보드) | `POV-STICK` |
+
+- 광고 데이터는 부팅 시 구성되므로 `SETOWNER` 직후가 아니라 **재부팅 후에 새 이름으로 보인다**
+- 이름은 **스캔 응답** AD 필드에 들어간다. AD 타입/길이 2바이트를 제외한 29바이트가
+  한계이며, 넘치면 UTF-8 문자 경계를 지키며 잘린다
+- **기기를 이름으로 찾지 말 것.** 앱은 서비스 UUID로 필터링하고
+  (`filters: [{ services: [NUS] }]`), PC 도구도 같은 방식이다 (`firmware/tools/povble.py`).
+  이름은 사람이 고르기 위한 표시용이다
 
 ## 2. 프레이밍
 

@@ -13,39 +13,20 @@
 
 시리얼(COM)과 동시에 보면 좋다. 단, 시리얼 포트를 잡고 있으면 arduino-cli의
 1200-baud 리셋(DFU 진입)이 실패하므로 플래시 전에는 모니터를 닫아야 한다.
+
+기기 탐색은 광고 이름이 아니라 Nordic UART Service UUID로 한다 (povble.py) —
+광고 이름이 주인마다 다르기 때문이다.
 """
 import asyncio
 import sys
 
-from bleak import BleakScanner, BleakClient
+from bleak import BleakClient
 
-DEVICE_NAME = "POV-STICK"
-RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  # 앱 -> 기기 (write)
-TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  # 기기 -> 앱 (notify)
-CHUNK = 20  # MTU 23 기준 ATT 페이로드. 웹앱 sendLine과 동일하게 유지
+from povble import LineReader, TX_UUID, find_wand, send
 
-received = []
-_buf = bytearray()
-
-
-def _on_notify(_sender, data):
-    _buf.extend(data)
-    while b"\n" in _buf:
-        i = _buf.index(b"\n")
-        line = bytes(_buf[:i]).decode("utf-8", "replace").strip()
-        del _buf[: i + 1]
-        if line:
-            print("   <- " + line, flush=True)
-            received.append(line)
-
-
-async def send(client, line, wait=1.8):
-    print("   -> " + line, flush=True)
-    data = (line + "\n").encode("utf-8")
-    for i in range(0, len(data), CHUNK):
-        await client.write_gatt_char(RX_UUID, data[i : i + CHUNK], response=False)
-        await asyncio.sleep(0.03)
-    await asyncio.sleep(wait)
+# 광고 이름은 주인마다 다르므로(<이름>의 LED) 이름으로 찾지 않는다 — povble.find_wand 참고
+_rx = LineReader(drop_heartbeat=False)   # EV HB 도 세야 하므로 남긴다
+received = _rx.lines
 
 
 # ---------------- 시나리오 ----------------
@@ -139,15 +120,12 @@ async def main():
         print("사용법: ble_selftest.py [%s]" % "|".join(SCENARIOS))
         return 2
 
-    print("%s 스캔 중 (최대 20s)..." % DEVICE_NAME, flush=True)
-    dev = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=20.0)
+    dev = await find_wand()
     if dev is None:
-        print("!! %s 광고를 못 찾음 — 전원/펌웨어 확인" % DEVICE_NAME, flush=True)
         return 2
-    print("연결: %s  %s" % (dev.name, dev.address), flush=True)
 
     async with BleakClient(dev) as client:
-        await client.start_notify(TX_UUID, _on_notify)
+        await client.start_notify(TX_UUID, _rx)
         await asyncio.sleep(1.2)
         ok = await SCENARIOS[which](client)
         # 하트비트가 계속 오는지 = loop()가 살아있는지

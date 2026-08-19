@@ -86,10 +86,23 @@ bool loadOwner();
 bool saveOwner(const char* name, const char* serial, const char* color);
 void clearOwner();
 
+// 고정 버퍼에 문자열을 담는다. 넘치면 자르되 UTF-8 문자 중간에서 자르지 않는다
+// (SETOWNER는 길이를 미리 검사하므로 실제로는 잘리지 않지만, 플래시에서 읽은
+//  값이 손상된 경우를 대비한 방어선이다)
+void copyUtf8(char* dst, size_t cap, const char* src) {
+  size_t n = strlen(src);
+  if (n > cap - 1) {
+    n = cap - 1;
+    while (n > 0 && ((uint8_t)src[n] & 0xC0) == 0x80) n--;   // 연속 바이트면 물러난다
+  }
+  memcpy(dst, src, n);
+  dst[n] = 0;
+}
+
 void setOwnerRec(const char* name, const char* serial, const char* color) {
-  snprintf(ownerRec.name,   sizeof(ownerRec.name),   "%s", name);
-  snprintf(ownerRec.serial, sizeof(ownerRec.serial), "%s", serial);
-  snprintf(ownerRec.color,  sizeof(ownerRec.color),  "%s", color);
+  copyUtf8(ownerRec.name,   sizeof(ownerRec.name),   name);
+  copyUtf8(ownerRec.serial, sizeof(ownerRec.serial), serial);
+  copyUtf8(ownerRec.color,  sizeof(ownerRec.color),  color);
   ownerRec.valid = true;
 }
 
@@ -130,6 +143,34 @@ void findOwner() {
 #endif
   Serial.println("owner: none (SETOWNER 로 주입 가능)");
   Serial.flush();
+}
+
+// ---------------- 광고 이름 ----------------
+// 완드를 여러 개 동시에 켰을 때 기기 선택창에서 구분되도록 주인 이름을 쓴다.
+//   주인 주입됨  -> "<이름>의 LED"
+//   미주입       -> "POV-STICK" (공장 기본값 — 새 보드도 항상 찾을 수 있게)
+//
+// 이름은 스캔 응답 AD 필드(31바이트)에 들어간다. AD 타입/길이 2바이트를 빼면
+// 29바이트가 한계이므로 넘치면 자르되, UTF-8 문자 중간에서 자르지 않는다.
+#define BLE_NAME_MAX 29
+char bleName[BLE_NAME_MAX + 1] = "POV-STICK";
+
+void composeBleName() {
+  if (!ownerRec.valid || !ownerRec.name[0]) {
+    snprintf(bleName, sizeof(bleName), "POV-STICK");
+    return;
+  }
+  const char* suffix = "의 LED";
+  size_t sufLen = strlen(suffix);
+  size_t budget = BLE_NAME_MAX > sufLen ? BLE_NAME_MAX - sufLen : 0;
+
+  size_t n = strlen(ownerRec.name);
+  if (n > budget) {
+    n = budget;
+    // 자른 지점이 UTF-8 연속 바이트(10xxxxxx)면 문자 경계까지 물러난다
+    while (n > 0 && ((uint8_t)ownerRec.name[n] & 0xC0) == 0x80) n--;
+  }
+  snprintf(bleName, sizeof(bleName), "%.*s%s", (int)n, ownerRec.name, suffix);
 }
 
 // ---------------- 상태 ----------------
@@ -400,9 +441,10 @@ void listSlots() {
     if (!f.open(path, FILE_O_READ)) continue;
     int type = f.read();
     if (type == 'T') {
-      char color[24] = {0}, text[64] = {0};
-      int ci = 0, c;
-      while ((c = f.read()) >= 0 && c != '\n' && ci < 23) color[ci++] = c;
+      // 색 줄은 미리보기에 쓰지 않으므로 값을 담지 않고 위치만 넘긴다
+      char text[64] = {0};
+      int c;
+      while ((c = f.read()) >= 0 && c != '\n') { }
       f.read((uint8_t*)text, 40);
       replyf("SLOT %d TXT %s", n, text);
     } else if (type == 'I') {
@@ -633,7 +675,8 @@ void handleLine(char* line) {
     ColorSpec probe;
     if (strlen(co) != 6 || !hex2rgb(co, probe.a)) { reply("ERR 2 color must be RRGGBB"); return; }
     if (!saveOwner(nm, sr, co)) { reply("ERR 3 storage unavailable"); return; }
-    reply("OK SETOWNER");
+    composeBleName();   // 다음 부팅부터 이 이름으로 광고한다
+    replyf("OK SETOWNER name=%s reboot_to_apply", bleName);
     return;
   }
 
@@ -957,7 +1000,14 @@ void setupBle() {
                            BLE_GATTC_WRITE_CMD_TX_QUEUE_SIZE_DEFAULT);
   Bluefruit.begin();
   // (주소 변조 핵 제거 — SoftDevice 가동 중 GAP 주소 변경이 수신 시 하드폴트 유발 의심)
-  Bluefruit.setName("POV-STICK");
+
+  // 광고 이름에 주인 이름을 쓰므로 setName 전에 주인 정보를 읽어야 한다.
+  // findOwner()는 Bluefruit.getAddr()을 쓰기 때문에 begin() 뒤여야 한다 — 이 순서가 유일한 정답
+  findOwner();
+  composeBleName();
+  Bluefruit.setName(bleName);
+  Serial.print("BLE name: "); Serial.println(bleName);
+  Serial.flush();
   // 연결 인터벌 7.5~15ms 요청 (단위 1.25ms). 중앙장치가 긴 인터벌을 쓰면 notify
   // 한 패킷마다 그만큼 걸려서 긴 응답이 느리고 유실 위험도 커진다 (위 reply 주석 참고)
   Bluefruit.Periph.setConnInterval(6, 12);
@@ -1001,8 +1051,7 @@ void setup() {
   strip.begin();
   strip.show();
 #endif
-  setupBle();
-  findOwner();
+  setupBle();   // 내부에서 findOwner() 까지 수행한다 (광고 이름에 필요)
   if (ownerRec.valid) {
     // 부팅 크레딧: 첫 스윙에 주인 이름이 뜬다. 버튼/BLE 조작 시 일반 콘텐츠로 전환
     char credit[80];
