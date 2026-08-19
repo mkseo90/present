@@ -3,7 +3,9 @@
 #pragma once
 
 // OTA 잠금 해제 PIN: 앱/터미널에서 "DFU <PIN>" 명령으로 부트로더 진입
-#define DFU_PIN "0000"
+// 반드시 길고 추측 어려운 문구로 바꿀 것 (공백 없는 아무 문자열, 예: 단어 3개 조합).
+// 짧은 숫자 PIN은 무차별 대입에 약함 — 5회 실패 시 재부팅 전까지 잠기지만, 길이가 근본 방어임
+#define DFU_PIN "change-me-to-long-phrase"
 
 // MAC → 주인 매핑 (부팅 시 시리얼에 찍히는 MAC을 등록. 이름에 공백 금지)
 struct Owner { const char* mac; const char* name; const char* serial; };
