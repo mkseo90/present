@@ -833,8 +833,21 @@ void pollBle() {
   }
 }
 
-// ---------------- 배터리 (HW 확정 후 구현) ----------------
-int readBattery() { return 100; } // TODO: ADC 분압 회로 연결 시 구현
+// ---------------- 배터리 ----------------
+// XIAO 내장 분압(1M/510k)으로 VBAT 측정. VBAT_ENABLE(P0.14)을 LOW로 해야 분압이 연결된다
+// (누설 ~3µA라 setup에서 상시 LOW로 둔다). 충전은 내장 BQ25101이 하드웨어로 알아서 하고,
+// 기본 전류 50mA다 — 배터리 용량 확정 후 100mA로 올릴지 결정 (P0.13 LOW = 100mA).
+int readBattery() {
+  analogReference(AR_INTERNAL);   // 3.6V
+  analogReadResolution(12);
+  uint32_t acc = 0;
+  for (int i = 0; i < 4; i++) acc += analogRead(PIN_VBAT);
+  // mV = adc/4095*3600 * (1000k+510k)/510k
+  uint32_t mv = (uint64_t)(acc / 4) * 3600 * 1510 / (4095 * 510);
+  // LiPo 근사: 3300mV=0%, 4150mV=100% (USB 급전 중엔 ~4.2V 근처로 뜬다)
+  int pct = (int)((mv - 3300) * 100 / (4150 - 3300));
+  return constrain(pct, 0, 100);
+}
 
 // ---------------- IMU 스윙 감지 ----------------
 // XIAO Sense 내장 LSM6DS3(가속도+자이로, Wire1, 전원핀은 라이브러리가 처리).
@@ -908,6 +921,113 @@ void imuTick() {
 
 bool isSwinging() { return sw.swinging; }
 uint32_t swingPeriodUs() { return 20000; }  // MODE_POV(수동)에서 SET SPEED 0일 때의 폴백
+
+// ---------------- OLED (확장보드 SSD1306 128x64, I2C 0x3C) ----------------
+// 주인 이름·배터리·연결 상태를 표시한다. 부팅 시 주소를 탐지해서 없으면 조용히 비활성.
+// ⚠ 확장보드 I2C(D4/D5)가 현재 LED 채널 4·5와 겹친다 — 핀맵 이사(A안) 확정 전까지는
+//   LED 하네스와 OLED를 동시에 물리지 말 것.
+#define USE_OLED 1
+#if USE_OLED
+#include <Wire.h>
+bool oledOk = false;
+uint8_t oledBuf[1024];   // 128x64 / 8
+
+void oledCmd(uint8_t c) {
+  Wire.beginTransmission(0x3C);
+  Wire.write((uint8_t)0x00);
+  Wire.write(c);
+  Wire.endTransmission();
+}
+
+bool oledInit() {
+  Wire.begin();
+  Wire.setClock(400000);
+  Wire.beginTransmission(0x3C);
+  if (Wire.endTransmission() != 0) return false;   // 없음
+  static const uint8_t seq[] = {
+    0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40, 0x8D, 0x14, 0x20, 0x00,
+    0xA1, 0xC8, 0xDA, 0x12, 0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6, 0xAF };
+  for (uint8_t i = 0; i < sizeof(seq); i++) oledCmd(seq[i]);
+  memset(oledBuf, 0, sizeof(oledBuf));
+  return true;
+}
+
+void oledShow() {
+  oledCmd(0x21); oledCmd(0); oledCmd(127);   // 컬럼 범위
+  oledCmd(0x22); oledCmd(0); oledCmd(7);     // 페이지 범위
+  for (int i = 0; i < 1024; i += 16) {
+    Wire.beginTransmission(0x3C);
+    Wire.write((uint8_t)0x40);
+    Wire.write(oledBuf + i, 16);
+    Wire.endTransmission();
+  }
+}
+
+// 8x8 글리프(우리 폰트 테이블)를 (x, page)에 그린다. scale 1 또는 2
+// 폰트 바이트 = 세로 한 컬럼(bit0=위) — SSD1306 페이지 구조와 동일해서 직행 복사 가능
+void oledGlyph(int x, int page, uint32_t cp, int scale) {
+  uint8_t g[8];
+  glyphFor(cp, g);
+  if (scale == 1) {
+    for (int c = 0; c < 8 && x + c < 128; c++) oledBuf[page * 128 + x + c] |= g[c];
+    return;
+  }
+  // 2배: 각 비트를 세로 2비트로, 컬럼을 가로 2번
+  for (int c = 0; c < 8; c++) {
+    uint16_t col2 = 0;
+    for (int b = 0; b < 8; b++) if (g[c] >> b & 1) col2 |= 3 << (b * 2);
+    for (int dx = 0; dx < 2; dx++) {
+      int px = x + c * 2 + dx;
+      if (px >= 128) break;
+      oledBuf[page * 128 + px]       |= col2 & 0xFF;
+      oledBuf[(page + 1) * 128 + px] |= col2 >> 8;
+    }
+  }
+}
+
+// UTF-8 문자열을 그린다. scale 2면 16px 높이. 반환: 그린 폭(px)
+int oledText(int x, int page, const char* s, int scale) {
+  const char* p = s;
+  while (*p && x < 128) {
+    uint32_t cp = nextCp(&p);
+    if (cp < 0x20) continue;
+    oledGlyph(x, page, cp, scale);
+    x += 8 * scale + scale;   // 글자 폭 + 자간
+  }
+  return x;
+}
+
+int oledTextWidth(const char* s, int scale) {
+  int n = 0;
+  for (const char* p = s; *p; ) { nextCp(&p); n++; }
+  return n * (8 * scale + scale);
+}
+
+// 화면 갱신: 주인 이름(2배) / 시리얼 / 배터리·연결 상태
+void oledTick() {
+  if (!oledOk) return;
+  static uint32_t last = 0;
+  if (millis() - last < 2000) return;
+  if (sw.swinging || testHold >= 0) return;   // 잔상/테스트 중엔 I2C로 타이밍 방해 금지
+  last = millis();
+
+  memset(oledBuf, 0, sizeof(oledBuf));
+  const char* name = ownerRec.valid ? ownerRec.name : "POV WAND";
+  int w = oledTextWidth(name, 2);
+  oledText(w < 128 ? (128 - w) / 2 : 0, 1, name, 2);
+  if (ownerRec.valid) {
+    w = oledTextWidth(ownerRec.serial, 1);
+    oledText(w < 128 ? (128 - w) / 2 : 0, 4, ownerRec.serial, 1);
+  }
+  char line[32];
+  snprintf(line, sizeof(line), "배터리 %d%%", readBattery());
+  oledText(4, 6, line, 1);
+  const char* st = Bluefruit.connected() ? (linkSecured ? "연결됨" : "페어링중") : "대기중";
+  w = oledTextWidth(st, 1);
+  oledText(128 - 4 - w, 6, st, 1);
+  oledShow();
+}
+#endif  // USE_OLED
 
 // ---------------- LED 출력 ----------------
 #if LED_TYPE == 3
@@ -1197,6 +1317,14 @@ void setup() {
   strip.begin();
   strip.show();
 #endif
+  // 배터리 분압 활성 (상시 LOW — 누설 ~3µA)
+  pinMode(VBAT_ENABLE, OUTPUT);
+  digitalWrite(VBAT_ENABLE, LOW);
+#if USE_OLED
+  oledOk = oledInit();
+  Serial.print("OLED: "); Serial.println(oledOk ? "ok" : "not found");
+  Serial.flush();
+#endif
 #if USE_IMU
   // 내장 LSM6DS3 (Wire1, 전원핀은 라이브러리 begin()이 켠다)
   imuOk = (imu.begin() == IMU_SUCCESS);
@@ -1240,6 +1368,9 @@ void loop() {
   pollBle();
   advWatchdog();
   imuTick();
+#if USE_OLED
+  oledTick();
+#endif
 
 #if REQUIRE_PAIRING
   // 연결 0.6초 후 페어링(암호화) 요청 — 본딩돼 있으면 조용히 재암호화된다
