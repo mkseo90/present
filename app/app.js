@@ -124,6 +124,11 @@ function onLine(line) {
     $("infBat").textContent = (kv.bat || "-") + "%";
     $("infOwner").textContent = kv.owner && kv.owner !== "-"
       ? `${kv.owner} (${kv.serial || ""})` : "-";
+    if (kv.owner && kv.owner !== "-") {
+      state.ownerName = kv.owner;
+      localStorage.setItem("ownerName", kv.owner);
+      renderDefaults();
+    }
     // 기기가 알려준 실제 하드웨어 사양을 반영 (보드마다 LED 색·개수가 다르다)
     // color= 를 주지 않는 기기(미등록 보드·시뮬레이터)에 붙었을 땐 이전 기기의 색을
     // 그대로 물고 있으면 안 되므로 기본값으로 되돌린다
@@ -353,6 +358,41 @@ function renderPresets() {
   });
 }
 
+// ---------- 기본 메시지 (앱 내장 리스트 — 켜자마자 표시) ----------
+// 1번 항목은 기기 주인 이름으로 동적 치환 (INFO 수신 시 갱신, 그 전엔 캐시/기본값)
+function defaultMessages() {
+  const owner = state.ownerName || localStorage.getItem("ownerName") || "USER";
+  return [owner, "Hello world!", "그동안 감사했습니다"];
+}
+function renderDefaults() {
+  const ul = $("defaultList");
+  if (!ul) return;
+  ul.innerHTML = "";
+  defaultMessages().forEach((text) => {
+    const li = document.createElement("li");
+    const txt = document.createElement("span");
+    txt.className = "txt";
+    txt.textContent = text;
+    const show = document.createElement("button");
+    show.className = "mini send";
+    show.textContent = "표시";
+    show.onclick = () => sendLine(`SHOW ${state.mono ? state.monoColor : "rainbow"} ${text}`).catch(() => {});
+    const save = document.createElement("button");
+    save.className = "mini";
+    save.textContent = "저장";
+    save.onclick = () => {
+      const used = new Set(state.slots.map((s) => s.n));
+      let n = 1;
+      while (used.has(n) && n <= 12) n++;
+      if (n > 12) { alert("슬롯이 가득 찼어요"); return; }
+      sendLine(`SAVE ${n} ${state.mono ? state.monoColor : "rainbow"} ${text}`)
+        .then(() => setTimeout(refreshSlots, 250)).catch(() => {});
+    };
+    li.append(txt, show, save);
+    ul.appendChild(li);
+  });
+}
+
 // ---------- 슬롯 (기기 저장) ----------
 function refreshSlots() {
   state.slots = [];
@@ -542,4 +582,5 @@ if (!("bluetooth" in navigator)) {
 }
 
 renderPresets();
+renderDefaults();
 setMonoUI(true);   // 기본 = 단색 완드 UI. 내부에서 renderPreview()까지 수행

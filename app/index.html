@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri@latest/dist/galmuri.css">
 <!-- 캐시버스터: app.js/style.css 고칠 때마다 ?v= 숫자를 올릴 것 (GitHub Pages가 10분 캐시) -->
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 
@@ -26,7 +26,7 @@
 
 <main>
   <!-- 보내기 -->
-  <section id="tab-send" class="tab active">
+  <section id="tab-send" class="tab">
     <div class="preview-box">
       <canvas id="preview" width="320" height="64"></canvas>
       <div class="preview-label">잔상 미리보기</div>
@@ -58,8 +58,13 @@
     <ul id="presetList" class="preset-list"></ul>
   </section>
 
-  <!-- 보관함 -->
-  <section id="tab-slots" class="tab">
+  <!-- 보관함 (시작 화면) -->
+  <section id="tab-slots" class="tab active">
+    <div class="slots-head">
+      <span>기본 메시지</span>
+    </div>
+    <ul id="defaultList" class="slot-list"></ul>
+
     <div class="slots-head">
       <span>기기에 저장된 콘텐츠</span>
       <span id="slotCount" class="muted"></span>
@@ -165,12 +170,12 @@
 </main>
 
 <nav>
-  <button data-tab="send" class="on">📤<span>보내기</span></button>
-  <button data-tab="slots">📂<span>보관함</span></button>
+  <button data-tab="send">📤<span>보내기</span></button>
+  <button data-tab="slots" class="on">📂<span>보관함</span></button>
   <button data-tab="settings">⚙️<span>설정</span></button>
 </nav>
 
-<script src="font8x8.js?v=4"></script>
-<script src="app.js?v=4"></script>
+<script src="font8x8.js?v=5"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

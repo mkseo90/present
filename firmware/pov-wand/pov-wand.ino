@@ -99,6 +99,11 @@ uint32_t pairReqAt = 0;   // 연결 후 이 시각에 페어링 요청 (0=예약
 #  define HAS_SECRETS 0
 #endif
 
+// 주인 미주입 시의 기본 소유자 (SETOWNER로 언제든 덮어씀)
+#define DEFAULT_OWNER_NAME   "USER"
+#define DEFAULT_OWNER_SERIAL "No.000/000"
+#define DEFAULT_OWNER_COLOR  "00FF66"
+
 char myMac[18] = "?";
 
 // 런타임 주인 정보. INFO 응답과 부팅 크레딧이 이걸 본다
@@ -169,7 +174,9 @@ void findOwner() {
     }
   }
 #endif
-  Serial.println("owner: none (SETOWNER 로 주입 가능)");
+  // 3순위: 기본값 — 광고 이름은 "USER의 LED", INFO owner=USER
+  setOwnerRec(DEFAULT_OWNER_NAME, DEFAULT_OWNER_SERIAL, DEFAULT_OWNER_COLOR);
+  Serial.println("owner: default (SETOWNER 로 주입 가능)");
   Serial.flush();
 }
 
@@ -891,6 +898,7 @@ struct Swing {
   uint32_t lastActiveMs;
   bool strokePending;   // 반전 감지됨 → 이번 스트로크에 한 번 그릴 것
 } sw = { false, -1, 0, 0, 0, 300, 0, false };
+uint32_t lastMotionMs = 0;   // 마지막으로 회전 움직임(>60dps)이 있던 시각 (탭 "멈춤" 판정용)
 
 void imuTick() {
 #if USE_IMU
@@ -904,6 +912,7 @@ void imuTick() {
   for (int i = 0; i < 3; i++) { float a = fabsf(g[i]); if (a > amax) { amax = a; ai = i; } }
 
   if (!sw.swinging) {
+    if (amax > 60) lastMotionMs = millis();
     if (amax > SWING_ON_DPS) {
       sw.swinging = true;
       sw.axis = ai;
@@ -916,6 +925,7 @@ void imuTick() {
 
   sw.rate = g[sw.axis];
   if (fabsf(sw.rate) > SWING_ON_DPS) sw.lastActiveMs = millis();
+  if (amax > 60) lastMotionMs = millis();   // 스윙보다 약한 움직임도 기록 (탭 제스처의 "멈춤" 판정용)
   if (millis() - sw.lastActiveMs > SWING_OFF_MS) {
     sw.swinging = false; sw.axis = -1; sw.strokePending = false;
     return;
@@ -938,7 +948,9 @@ bool isSwinging() { return sw.swinging; }
 uint32_t swingPeriodUs() { return 20000; }  // MODE_POV(수동)에서 SET SPEED 0일 때의 폴백
 
 // ---- 톡톡(더블탭) 제스처: 버튼 없이 슬롯 전환 ----
-// 스윙 중이 아닐 때 가속도 스파이크(>1.8g 초과분) 2번이 700ms 안에 오면 발동
+// 발동 조건 두 가지 모두 충족 (사용자 요구):
+//   1. 멈춤 상태 — 스윙 아님 + 직전 300ms간 회전 움직임(>60dps) 없음
+//   2. 가속도 스파이크(>1.8g 초과분) 2번이 700ms 안에
 bool tapCycleReq = false;
 
 void tapTick() {
@@ -953,7 +965,11 @@ void tapTick() {
   float mag = fabsf(sqrtf(ax * ax + ay * ay + az * az) - 1.0f);  // 중력 제외한 충격량(g)
   if (mag > 1.8f && millis() - refrac > 250) {
     refrac = millis();
-    if (taps == 0 || millis() - firstTap > 700) { taps = 1; firstTap = millis(); }
+    if (taps == 0 || millis() - firstTap > 700) {
+      // 새 시퀀스는 "멈춤 상태"에서만 시작 (조건 1)
+      if (millis() - lastMotionMs < 300) return;
+      taps = 1; firstTap = millis();
+    }
     else if (++taps >= 2) { taps = 0; tapCycleReq = true; }
   }
   if (taps && millis() - firstTap > 700) taps = 0;   // 두 번째 탭이 안 오면 리셋
