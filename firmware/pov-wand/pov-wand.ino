@@ -31,7 +31,8 @@ using namespace Adafruit_LittleFS_Namespace;
 //   확장보드와의 충돌 회피 — D1(버튼)·D3(부저)·D4/D5(I2C)를 LED에서 제외.
 //   버튼은 확장보드 내장 버튼(D1)을 그대로 사용.
 //   구형 하네스(D0~D6, 버튼 D10)로 테스트하려면 PINMAP_LEGACY 1
-#define PINMAP_LEGACY 0
+// 2026-08-20: 부저 물리 제거로 소리 문제 해결 → LED는 D0~D6 유지 (사용자 결정)
+#define PINMAP_LEGACY 1
 #if PINMAP_LEGACY
 #define PIN_BUTTON 10
 #else
