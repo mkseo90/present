@@ -1128,9 +1128,14 @@ void oledBattIcon(int x, int page, int pct) {
 void oledTick() {
   if (!oledOk) return;
   static uint32_t last = 0;
-  if (last != 0 && millis() - last < 10000) return;   // 첫 회(부팅 직후)는 즉시 출력
-  if (sw.swinging || testHold >= 0) return;   // 잔상/테스트 중엔 절대 안 건드림
-  if (cfg.mode == MODE_POV) return;           // 수동 잔상 모드도 제외
+  static bool wasSwinging = false;
+  if (sw.swinging || testHold >= 0) { wasSwinging = true; return; }  // 잔상/테스트 중 금지
+  if (cfg.mode == MODE_POV) { wasSwinging = true; return; }          // 수동 잔상도 금지
+  // 그리는 시점: ①부팅 직후 ②스윙/테스트가 막 끝났을 때(즉시 복구) ③대기 10초마다
+  bool justStopped = wasSwinging;
+  wasSwinging = false;
+  if (!justStopped && last != 0 && millis() - last < 10000) return;
+  if (justStopped) delay(50);   // 스윙 종료 직후 잔여 토글이 가라앉을 시간
   last = millis();
   oledBusTake();
   // 매번 풀 재초기화: LED 토글이 만든 쓰레기 I2C가 표시 '설정'을 깨뜨렸어도 복구되게
@@ -1315,10 +1320,12 @@ void idleGlow() {
   static uint16_t phase = 0;
   phase++;
   // 아래에서 위로 흐르는 물결: 한 번에 2~3개씩 켜지며 이동
-  // OLED 공존: SCL(D5) 채널은 대기 중 상시 LOW — 클럭이 안 움직이면 SDA(D4)가
-  // 토글해도 I2C 명령이 성립하지 않아 화면이 안 깨진다
+  // OLED 공존: 대기 중엔 I2C 라인(D4/D5) 채널을 상시 LOW로 묶는다 — 파형이 없으면
+  // OLED가 오해할 것도 없다. 화면은 "볼 수 있는 상태(대기)"에서 항상 깨끗하게 유지되고,
+  // 잔상(스윙) 중에만 7줄 전부 쓰며 깨질 수 있는데 그때는 아무도 화면을 안 본다.
+  // 스윙이 끝나면 oledTick이 즉시 풀 재초기화로 복구한다.
   for (int y = 0; y < NUM_LEDS; y++) {
-    if (oledOk && LED_PINS[y] == 5) { digitalWrite(5, LOW); continue; }
+    if (oledOk && (LED_PINS[y] == 4 || LED_PINS[y] == 5)) { digitalWrite(LED_PINS[y], LOW); continue; }
     uint8_t d = (y + phase / 6) % NUM_LEDS;
     digitalWrite(LED_PINS[y], d < 3 ? HIGH : LOW);
   }
