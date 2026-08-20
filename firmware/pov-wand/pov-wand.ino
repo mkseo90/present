@@ -193,6 +193,7 @@ struct Config {
   uint8_t mode = MODE_AUTO;
   uint16_t speedUs = 0;       // 0 = IMU 자동
   uint8_t startSlot = 1;
+  uint8_t flip = 0;           // 1 = 컬럼 역순 출력 (스윙 방향에 따른 좌우반전 보정)
 } cfg;
 
 // 표시 버퍼: 컬럼당 8픽셀 × RGB
@@ -783,6 +784,8 @@ void handleLine(char* line) {
       else { reply("ERR 2 bad mode"); return; }
     } else if (strcmp(what, "SPEED") == 0) {
       cfg.speedUs = atoi(val) * 1000;
+    } else if (strcmp(what, "FLIP") == 0) {
+      cfg.flip = atoi(val) ? 1 : 0;
     } else { reply("ERR 1 unknown key"); return; }
     cfgDirtyAt = millis();
     reply("OK SET");
@@ -1024,8 +1027,23 @@ void onBleDisconnect(uint16_t h, uint8_t reason) {
   // 0x3E 연결 수립 실패, 0x16 로컬 종료
   Serial.print("BLE disconnected, reason=0x");
   Serial.println(reason, HEX);
+  Serial.flush();
   linkSecured = false;
   pairReqAt = 0;
+}
+
+// 광고 감시견: 연결이 없는데 광고도 꺼져 있으면 되살린다.
+// restartOnDisconnect(true)만으로는 (본딩 도입 후) 재광고가 안 되는 사례가 실기기에서
+// 확인됐다 — 끊고 나면 재부팅 전까지 스캔에 안 잡혔음. 코어 자동복구에 의존하지 않는다.
+void advWatchdog() {
+  static uint32_t lastCheck = 0;
+  if (millis() - lastCheck < 1000) return;
+  lastCheck = millis();
+  if (!Bluefruit.connected() && !Bluefruit.Advertising.isRunning()) {
+    Serial.println("[adv] restarting advertising");
+    Serial.flush();
+    Bluefruit.Advertising.start(0);
+  }
 }
 
 void bleRxCallback(uint16_t conn_hdl) {
@@ -1134,6 +1152,7 @@ void loop() {
   }
 
   pollBle();
+  advWatchdog();
 
 #if REQUIRE_PAIRING
   // 연결 0.6초 후 페어링(암호화) 요청 — 본딩돼 있으면 조용히 재암호화된다
@@ -1188,7 +1207,7 @@ void loop() {
   if (pov && content.cols > 0) {
     uint32_t colUs = cfg.speedUs ? cfg.speedUs : swingPeriodUs() / content.cols;
     for (uint16_t c = 0; c < content.cols; c++) {
-      outputColumn(c);
+      outputColumn(cfg.flip ? content.cols - 1 - c : c);
       if (colUs >= 1000) delay(colUs / 1000);          // ms 단위는 RTOS 양보(yield)하는 delay로
       delayMicroseconds(colUs % 1000);
       pollBle();
