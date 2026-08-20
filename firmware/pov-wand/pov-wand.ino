@@ -937,6 +937,29 @@ void imuTick() {
 bool isSwinging() { return sw.swinging; }
 uint32_t swingPeriodUs() { return 20000; }  // MODE_POV(수동)에서 SET SPEED 0일 때의 폴백
 
+// ---- 톡톡(더블탭) 제스처: 버튼 없이 슬롯 전환 ----
+// 스윙 중이 아닐 때 가속도 스파이크(>1.8g 초과분) 2번이 700ms 안에 오면 발동
+bool tapCycleReq = false;
+
+void tapTick() {
+#if USE_IMU
+  if (!imuOk || sw.swinging) return;
+  static uint32_t lastSample = 0, refrac = 0, firstTap = 0;
+  static uint8_t taps = 0;
+  if (millis() - lastSample < 10) return;
+  lastSample = millis();
+
+  float ax = imu.readFloatAccelX(), ay = imu.readFloatAccelY(), az = imu.readFloatAccelZ();
+  float mag = fabsf(sqrtf(ax * ax + ay * ay + az * az) - 1.0f);  // 중력 제외한 충격량(g)
+  if (mag > 1.8f && millis() - refrac > 250) {
+    refrac = millis();
+    if (taps == 0 || millis() - firstTap > 700) { taps = 1; firstTap = millis(); }
+    else if (++taps >= 2) { taps = 0; tapCycleReq = true; }
+  }
+  if (taps && millis() - firstTap > 700) taps = 0;   // 두 번째 탭이 안 오면 리셋
+#endif
+}
+
 // ---------------- OLED (확장보드 SSD1306 128x64, I2C 0x3C) ----------------
 // 주인 이름·배터리·연결 상태를 표시한다. 부팅 시 주소를 탐지해서 없으면 조용히 비활성.
 // ⚠ 확장보드 I2C(D4/D5)가 현재 LED 채널 4·5와 겹친다 — 핀맵 이사(A안) 확정 전까지는
@@ -1456,18 +1479,22 @@ void loop() {
   }
 #endif
 
-  // 버튼: 짧게 눌러 다음 슬롯 (스켈레톤 — 디바운스/길게누름은 TODO)
+  // 슬롯 전환: 톡톡(더블탭) 제스처 — 최종 완드에 물리 버튼 없음(사용자 결정).
+  // D10 버튼 코드도 유지 (개발 지그에서 택트 물리면 그대로 동작)
+  tapTick();
   static bool lastBtn = HIGH;
   bool btn = digitalRead(PIN_BUTTON);
-  if (lastBtn == HIGH && btn == LOW) {
+  bool press = (lastBtn == HIGH && btn == LOW);
+  lastBtn = btn;
+  if (press || tapCycleReq) {
+    tapCycleReq = false;
     uint8_t n = currentSlot;
     for (uint8_t i = 0; i < MAX_SLOTS; i++) {
       n = n % MAX_SLOTS + 1;
       if (loadSlot(n)) break;
     }
-    delay(30); // 임시 디바운스
+    if (press) delay(30); // 임시 디바운스
   }
-  lastBtn = btn;
 
   if (cfg.mode == MODE_POV && content.cols > 0) {
     // 수동 잔상: SET SPEED 간격으로 연속 반복 (IMU 무시, 튜닝/시연용)
