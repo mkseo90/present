@@ -1317,17 +1317,19 @@ void ledsOff() {
 // 대기 모드: 컬러 LED는 느린 무지개 순환, 단색 LED는 물결 점멸
 void idleGlow() {
 #if LED_TYPE == 3
-  static uint16_t phase = 0;
-  phase++;
-  // 아래에서 위로 흐르는 물결: 한 번에 2~3개씩 켜지며 이동
-  // OLED 공존: 대기 중엔 I2C 라인(D4/D5) 채널을 상시 LOW로 묶는다 — 파형이 없으면
-  // OLED가 오해할 것도 없다. 화면은 "볼 수 있는 상태(대기)"에서 항상 깨끗하게 유지되고,
-  // 잔상(스윙) 중에만 7줄 전부 쓰며 깨질 수 있는데 그때는 아무도 화면을 안 본다.
-  // 스윙이 끝나면 oledTick이 즉시 풀 재초기화로 복구한다.
-  for (int y = 0; y < NUM_LEDS; y++) {
-    if (oledOk && (LED_PINS[y] == 4 || LED_PINS[y] == 5)) { digitalWrite(LED_PINS[y], LOW); continue; }
-    uint8_t d = (y + phase / 6) % NUM_LEDS;
-    digitalWrite(LED_PINS[y], d < 3 ? HIGH : LOW);
+  if (oledOk) {
+    // OLED가 있으면 대기 표시는 화면이 담당 — LED는 전부 소등 (사용자 결정).
+    // I2C 라인에 파형이 전혀 없으므로 화면이 깨질 일도 없고 배터리도 아낀다.
+    // 잔상(스윙) 중에만 7줄 전부 쓰고, 스윙이 끝나면 oledTick이 즉시 재초기화한다.
+    for (int y = 0; y < NUM_LEDS; y++) digitalWrite(LED_PINS[y], LOW);
+  } else {
+    // OLED 없는 구성: 기존 물결 유지 (아래에서 위로, 한 번에 2~3개)
+    static uint16_t phase = 0;
+    phase++;
+    for (int y = 0; y < NUM_LEDS; y++) {
+      uint8_t d = (y + phase / 6) % NUM_LEDS;
+      digitalWrite(LED_PINS[y], d < 3 ? HIGH : LOW);
+    }
   }
 #elif LED_TYPE
   static uint16_t phase = 0;
