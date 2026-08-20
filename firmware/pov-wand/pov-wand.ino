@@ -417,6 +417,7 @@ void loadConfig() {}
 bool loadOwner() { return false; }
 bool saveOwner(const char*, const char*, const char*) { return false; }
 void clearOwner() {}
+void seedDefaultSlots() {}
 #else
 // 파일 /s<N>: [type(1B: 'T'/'I')][colorspec\n(TXT)] payload
 void slotPath(char* out, uint8_t n) { sprintf(out, "/s%d", n); }
@@ -541,6 +542,23 @@ bool loadOwner() {
 void clearOwner() {
   InternalFS.remove("/owner");
   ownerRec.valid = false;
+}
+
+// 공장 기본 메시지 시딩: 이 펌웨어를 처음 켠 기기에서 딱 한 번, 슬롯 1~3에
+// [소유자이름 / Hello world! / 그동안 감사했습니다]를 저장한다.
+// /seeded 마커를 남기므로 사용자가 지우거나 고친 메시지는 다시 살아나지 않는다.
+void seedDefaultSlots() {
+  File f(InternalFS);
+  if (f.open("/seeded", FILE_O_READ)) { f.close(); return; }
+  if (usedSlots() == 0) {
+    const char* color = ownerRec.valid ? ownerRec.color : DEFAULT_OWNER_COLOR;
+    saveSlotText(1, color, ownerRec.valid ? ownerRec.name : DEFAULT_OWNER_NAME);
+    saveSlotText(2, color, "Hello world!");
+    saveSlotText(3, color, "그동안 감사했습니다");
+    Serial.println("[seed] default slots 1-3 written");
+    Serial.flush();
+  }
+  if (f.open("/seeded", FILE_O_WRITE)) { f.write('1'); f.close(); }
 }
 
 void saveConfig() {
@@ -1419,6 +1437,7 @@ void setup() {
   Serial.flush();
 #endif
   setupBle();   // 내부에서 findOwner() 까지 수행한다 (광고 이름에 필요)
+  seedDefaultSlots();   // 최초 1회: 기본 메시지 3종을 슬롯에 (owner 확정 후여야 함)
   if (ownerRec.valid) {
     // 부팅 크레딧: 첫 스윙에 주인 이름이 뜬다. 버튼/BLE 조작 시 일반 콘텐츠로 전환
     char credit[80];
