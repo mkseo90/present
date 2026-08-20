@@ -187,6 +187,28 @@ input[type=range] { accent-color: var(--violet); height: 28px; }
   word-break: break-all;
 }
 
+.admin-panel {
+  border: 1px dashed var(--yellow);
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.admin-panel.hidden { display: none; }
+.admin-title { font-size: 14px; font-weight: 700; color: var(--yellow); }
+.admin-title small { color: var(--text-dim); font-weight: 400; }
+.admin-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.admin-row input {
+  background: var(--card2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 7px 9px;
+  min-width: 0;
+}
+
 .about-card {
   background: var(--card);
   border: 1px solid var(--line);

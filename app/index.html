@@ -97,6 +97,53 @@
       <pre id="log"></pre>
     </details>
 
+    <div id="adminPanel" class="admin-panel hidden">
+      <div class="admin-title">🔧 관리자 모드 <small>(로고 7번 탭으로 켜고 끔)</small></div>
+
+      <label class="setting">
+        <span>잔상 속도(컬럼 간격) <b id="speedVal">10ms</b> <small>0 = 자동(IMU)</small></span>
+        <input type="range" id="speed" min="0" max="30" value="10" step="1">
+      </label>
+
+      <div class="setting"><span>LED 테스트</span>
+        <div class="admin-row">
+          <button class="mini" data-cmd="TEST on">전체 점등</button>
+          <button class="mini" data-cmd="TEST chase">순차</button>
+          <button class="mini" data-cmd="TEST off">소등</button>
+          <button class="mini" data-cmd="TEST end">해제</button>
+        </div>
+      </div>
+
+      <div class="setting"><span>배선 진단 (결과는 통신 로그)</span>
+        <div class="admin-row">
+          <button class="mini" data-cmd="PROBE up">PROBE up</button>
+          <button class="mini" data-cmd="PROBE down">PROBE down</button>
+          <button class="mini" data-cmd="PROBE sweep">전체 스윕</button>
+        </div>
+      </div>
+
+      <div class="setting"><span>주인 주입 (공백 없이)</span>
+        <div class="admin-row">
+          <input id="ownName" placeholder="이름" style="width:80px">
+          <input id="ownSerial" placeholder="No.001/001" style="width:100px">
+          <input id="ownColor" placeholder="00FF66" style="width:70px">
+          <button id="btnSetOwner" class="mini send">주입</button>
+        </div>
+      </div>
+
+      <div class="setting"><span>원시 명령 (PROTOCOL.md 전체)</span>
+        <div class="admin-row">
+          <input id="rawCmd" placeholder="예: SET SPEED 8" style="flex:1">
+          <button id="btnRaw" class="mini send">전송</button>
+        </div>
+      </div>
+
+      <div class="admin-row">
+        <button id="btnClrBond" class="mini del">본딩 초기화</button>
+        <button id="btnClrOwner" class="mini del">주인 삭제</button>
+      </div>
+    </div>
+
     <div class="about-card">
       <div class="about-logo">🪄</div>
       <div class="about-name">선물</div>

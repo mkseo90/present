@@ -488,6 +488,54 @@ if (!fsReq) {
   }
 }
 
+// ---------- 관리자 모드 (헤더 로고 7번 연속 탭으로 토글) ----------
+const isAdmin = () => localStorage.getItem("admin") === "1";
+function applyAdmin() { $("adminPanel").classList.toggle("hidden", !isAdmin()); }
+{
+  let taps = 0, lastTap = 0;
+  document.querySelector(".brand").addEventListener("click", () => {
+    const now = Date.now();
+    if (now - lastTap > 1500) taps = 0;
+    lastTap = now;
+    if (++taps >= 7) {
+      taps = 0;
+      localStorage.setItem("admin", isAdmin() ? "0" : "1");
+      applyAdmin();
+      alert(isAdmin() ? "관리자 모드 ON" : "관리자 모드 OFF");
+    }
+  });
+  applyAdmin();
+}
+
+$("speed").oninput = (e) =>
+  $("speedVal").textContent = e.target.value == 0 ? "자동" : e.target.value + "ms";
+$("speed").onchange = (e) => sendLine(`SET SPEED ${e.target.value}`).catch(() => {});
+
+document.querySelectorAll("[data-cmd]").forEach((b) => {
+  b.onclick = () => sendLine(b.dataset.cmd).catch(() => {});
+});
+
+$("btnRaw").onclick = () => {
+  const v = $("rawCmd").value.trim();
+  if (v) sendLine(v).catch(() => {});
+};
+$("rawCmd").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btnRaw").click(); });
+
+$("btnSetOwner").onclick = () => {
+  const nm = $("ownName").value.trim(), sr = $("ownSerial").value.trim(), co = $("ownColor").value.trim();
+  if (!nm || !sr || !/^[0-9A-Fa-f]{6}$/.test(co)) { alert("이름/시리얼/색(RRGGBB)을 확인하세요"); return; }
+  if (!confirm(`이 완드의 주인을 "${nm}"(으)로 주입할까요?\n광고 이름은 재부팅 후 "${nm}의 LED"가 됩니다.`)) return;
+  sendLine(`SETOWNER ${nm} ${sr} ${co.toUpperCase()}`).catch(() => {});
+};
+
+$("btnClrBond").onclick = () => {
+  if (confirm("페어링 본딩 정보를 삭제할까요?\n(폰 블루투스 설정에서도 기기를 삭제해야 재페어링됩니다)"))
+    sendLine("CLRBOND").catch(() => {});
+};
+$("btnClrOwner").onclick = () => {
+  if (confirm("주인 정보를 삭제할까요?")) sendLine("CLROWNER").catch(() => {});
+};
+
 if (!("bluetooth" in navigator)) {
   $("btnConnect").textContent = "BLE 미지원";
   $("btnConnect").disabled = true;
