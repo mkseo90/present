@@ -25,8 +25,18 @@ using namespace Adafruit_LittleFS_Namespace;
 // LED 타입: 0=없음(시리얼 디버그), 1=APA102/SK9822(SPI 2선), 2=WS2812B(단선),
 //           3=단색 LED GPIO 직결 (최종 HW: GREEN LED 8개)
 #define LED_TYPE 3
-#define NUM_LEDS 7            // HW 확정: GREEN LED 7개, D0~D6 (2026-08-19)
-#define PIN_BUTTON 10         // D10: 택트 버튼 (회로 확정 후 변경)
+#define NUM_LEDS 7
+
+// 핀맵 (2026-08-20, 확장보드 최종 채택에 따른 A안):
+//   확장보드와의 충돌 회피 — D1(버튼)·D3(부저)·D4/D5(I2C)를 LED에서 제외.
+//   버튼은 확장보드 내장 버튼(D1)을 그대로 사용.
+//   구형 하네스(D0~D6, 버튼 D10)로 테스트하려면 PINMAP_LEGACY 1
+#define PINMAP_LEGACY 0
+#if PINMAP_LEGACY
+#define PIN_BUTTON 10
+#else
+#define PIN_BUTTON 1          // 확장보드 내장 버튼
+#endif
 
 #if LED_TYPE == 1
 #include <Adafruit_DotStar.h>
@@ -39,7 +49,11 @@ Adafruit_NeoPixel strip(NUM_LEDS, PIN_WS2812, NEO_GRB + NEO_KHZ800);
 #elif LED_TYPE == 3
 // 위(끝)부터 아래 순서. 폰트는 8px 테이블의 bit0~6 사용 (Galmuri7이 7px 디자인이라
 // 글자 본체가 상단 7줄에 들어감 — 영문 디센더 1px만 잘림)
+#if PINMAP_LEGACY
 static const uint8_t LED_PINS[NUM_LEDS] = { 0, 1, 2, 3, 4, 5, 6 };
+#else
+static const uint8_t LED_PINS[NUM_LEDS] = { 0, 2, 6, 7, 8, 9, 10 };
+#endif
 #endif
 
 // ---------------- 상수 ----------------
@@ -1116,17 +1130,18 @@ void probePins(bool pullup) {
   replyf("OK PROBE %s", pullup ? "up" : "down");
 }
 
-// 진단으로 건드린 핀들을 원래 역할로 되돌린다
+// 진단으로 건드린 핀들을 원래 역할로 되돌린다 (핀맵과 무관하게 동적으로)
+bool isLedPin(uint8_t d) {
+  for (int y = 0; y < NUM_LEDS; y++) if (LED_PINS[y] == d) return true;
+  return false;
+}
 void restorePins() {
-  for (int y = 0; y < NUM_LEDS; y++) {
-    pinMode(LED_PINS[y], OUTPUT);
-    digitalWrite(LED_PINS[y], LOW);
+  for (uint8_t d = 0; d <= 10; d++) {
+    if (isLedPin(d)) { pinMode(d, OUTPUT); digitalWrite(d, LOW); }
+    else if (d == PIN_BUTTON) pinMode(d, INPUT_PULLUP);
+    else pinMode(d, INPUT);
   }
   setLedDrive(true);
-  pinMode(PIN_BUTTON, INPUT_PULLUP);
-  pinMode(7, INPUT);
-  pinMode(8, INPUT);
-  pinMode(9, INPUT);
   pinMode(LED_BLUE, INPUT);
   pinMode(LED_GREEN, INPUT);
 #if DEBUG_BEACON
