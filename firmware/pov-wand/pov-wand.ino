@@ -580,6 +580,20 @@ void handleLine(char* line) {
 
   if (strcmp(cmd, "PING") == 0) { reply("PONG"); return; }
 
+  // IMU 상태 조회 (스윙 감지 튜닝용)
+  if (strcmp(cmd, "IMU") == 0) {
+#if USE_IMU
+    if (!imuOk) { reply("ERR 3 imu init failed"); return; }
+    float gx = imu.readFloatGyroX(), gy = imu.readFloatGyroY(), gz = imu.readFloatGyroZ();
+    replyf("IMU sw=%d axis=%d dir=%d stroke=%lums g=%d/%d/%d dps",
+           sw.swinging ? 1 : 0, sw.axis, sw.dir, (unsigned long)sw.strokeMs,
+           (int)gx, (int)gy, (int)gz);
+#else
+    reply("ERR 3 imu disabled");
+#endif
+    return;
+  }
+
   if (strcmp(cmd, "INFO") == 0) {
     const char* m = cfg.mode == MODE_AUTO ? "auto" : cfg.mode == MODE_POV ? "pov" : "idle";
     // color/leds: 단색 완드의 실제 하드웨어를 앱에 알려 미리보기를 맞추기 위한 필드.
@@ -822,12 +836,78 @@ void pollBle() {
 // ---------------- 배터리 (HW 확정 후 구현) ----------------
 int readBattery() { return 100; } // TODO: ADC 분압 회로 연결 시 구현
 
-// ---------------- IMU 스윙 감지 (스켈레톤) ----------------
-// TODO: LSM6DS3 라이브러리 연결. 보드 도착 후 임계값 튜닝
-// #include "LSM6DS3.h"
-// LSM6DS3 imu(I2C_MODE, 0x6A);
-bool isSwinging() { return false; }       // TODO
-uint32_t swingPeriodUs() { return 20000; } // TODO: 스윙 주기 기반 컬럼 간격
+// ---------------- IMU 스윙 감지 ----------------
+// XIAO Sense 내장 LSM6DS3(가속도+자이로, Wire1, 전원핀은 라이브러리가 처리).
+// 자이로로 스윙을 감지한다: 완드를 휘두르면 손목 중심 회전이라 각속도가 크다.
+//   - 지배 축 자동 선정: 처음 임계값을 넘은 축을 그 스윙의 기준 축으로 (조립 방향 무관)
+//   - 방향 반전 순간 포착 → 반 주기(스트로크) 측정 → 스트로크당 한 번 그리기
+//   - 방향에 따라 컬럼 순서를 뒤집어 왕복 양쪽에서 글자가 바로 보이게 한다
+#define USE_IMU 1
+#if USE_IMU
+#include "LSM6DS3.h"
+LSM6DS3 imu(I2C_MODE, 0x6A);
+#endif
+bool imuOk = false;
+
+// 튜닝 파라미터 (IMU 명령으로 실측하며 조정)
+#define SWING_ON_DPS  120.0f   // 이 각속도(도/초) 이상이면 "흔드는 중"
+#define SWING_OFF_MS  700      // 이 시간 동안 잠잠하면 대기 모드로
+
+struct Swing {
+  bool swinging;
+  int8_t axis;          // 지배 축 0=X 1=Y 2=Z (-1=미정)
+  float rate;           // 지배 축 최근 각속도 (부호 포함)
+  int8_t dir;           // 현재 스트로크 방향 +1/-1
+  uint32_t lastRevMs;   // 마지막 방향 반전 시각
+  uint32_t strokeMs;    // 최근 스트로크(반 주기) 추정
+  uint32_t lastActiveMs;
+  bool strokePending;   // 반전 감지됨 → 이번 스트로크에 한 번 그릴 것
+} sw = { false, -1, 0, 0, 0, 300, 0, false };
+
+void imuTick() {
+#if USE_IMU
+  if (!imuOk) return;
+  static uint32_t lastMs = 0;
+  if (millis() - lastMs < 5) return;   // ~200Hz 상한
+  lastMs = millis();
+
+  float g[3] = { imu.readFloatGyroX(), imu.readFloatGyroY(), imu.readFloatGyroZ() };
+  float amax = 0; int ai = 0;
+  for (int i = 0; i < 3; i++) { float a = fabsf(g[i]); if (a > amax) { amax = a; ai = i; } }
+
+  if (!sw.swinging) {
+    if (amax > SWING_ON_DPS) {
+      sw.swinging = true;
+      sw.axis = ai;
+      sw.dir = g[ai] > 0 ? 1 : -1;
+      sw.lastRevMs = sw.lastActiveMs = millis();
+      sw.strokePending = true;   // 첫 스트로크부터 그린다
+    }
+    return;
+  }
+
+  sw.rate = g[sw.axis];
+  if (fabsf(sw.rate) > SWING_ON_DPS) sw.lastActiveMs = millis();
+  if (millis() - sw.lastActiveMs > SWING_OFF_MS) {
+    sw.swinging = false; sw.axis = -1; sw.strokePending = false;
+    return;
+  }
+
+  // 방향 반전: 반대 부호로 임계값을 넘는 순간 (히스테리시스 겸용)
+  int8_t d = sw.rate > SWING_ON_DPS ? 1 : (sw.rate < -SWING_ON_DPS ? -1 : 0);
+  if (d != 0 && d != sw.dir) {
+    uint32_t now = millis();
+    uint32_t dt = now - sw.lastRevMs;
+    if (dt > 80 && dt < 2000) sw.strokeMs = dt;   // 말도 안 되는 값은 버림
+    sw.lastRevMs = now;
+    sw.dir = d;
+    sw.strokePending = true;
+  }
+#endif
+}
+
+bool isSwinging() { return sw.swinging; }
+uint32_t swingPeriodUs() { return 20000; }  // MODE_POV(수동)에서 SET SPEED 0일 때의 폴백
 
 // ---------------- LED 출력 ----------------
 #if LED_TYPE == 3
@@ -1117,6 +1197,12 @@ void setup() {
   strip.begin();
   strip.show();
 #endif
+#if USE_IMU
+  // 내장 LSM6DS3 (Wire1, 전원핀은 라이브러리 begin()이 켠다)
+  imuOk = (imu.begin() == IMU_SUCCESS);
+  Serial.print("IMU: "); Serial.println(imuOk ? "ok" : "INIT FAIL");
+  Serial.flush();
+#endif
   setupBle();   // 내부에서 findOwner() 까지 수행한다 (광고 이름에 필요)
   if (ownerRec.valid) {
     // 부팅 크레딧: 첫 스윙에 주인 이름이 뜬다. 버튼/BLE 조작 시 일반 콘텐츠로 전환
@@ -1153,6 +1239,7 @@ void loop() {
 
   pollBle();
   advWatchdog();
+  imuTick();
 
 #if REQUIRE_PAIRING
   // 연결 0.6초 후 페어링(암호화) 요청 — 본딩돼 있으면 조용히 재암호화된다
@@ -1203,8 +1290,8 @@ void loop() {
   }
   lastBtn = btn;
 
-  bool pov = cfg.mode == MODE_POV || (cfg.mode == MODE_AUTO && isSwinging());
-  if (pov && content.cols > 0) {
+  if (cfg.mode == MODE_POV && content.cols > 0) {
+    // 수동 잔상: SET SPEED 간격으로 연속 반복 (IMU 무시, 튜닝/시연용)
     uint32_t colUs = cfg.speedUs ? cfg.speedUs : swingPeriodUs() / content.cols;
     for (uint16_t c = 0; c < content.cols; c++) {
       outputColumn(cfg.flip ? content.cols - 1 - c : c);
@@ -1214,6 +1301,25 @@ void loop() {
     }
     ledsOff();
     delay(2);  // 프레임 사이 BLE/USB 태스크에 숨 쉴 틈 (busy-wait 독점 방지)
+  } else if (cfg.mode == MODE_AUTO && sw.swinging && content.cols > 0) {
+    // 자동 잔상: 방향 반전마다 한 번씩, 스트로크 시간의 70%에 맞춰 그린다
+    if (sw.strokePending) {
+      sw.strokePending = false;
+      uint32_t colUs = (uint32_t)sw.strokeMs * 700 / content.cols;   // ms→µs×0.7
+      colUs = constrain(colUs, 200, 30000);
+      // 스트로크 방향에 따라 자동 반전. cfg.flip은 기준(어느 쪽이 정방향인지) 뒤집기
+      bool rev = (sw.dir < 0) != (cfg.flip != 0);
+      for (uint16_t c = 0; c < content.cols; c++) {
+        outputColumn(rev ? content.cols - 1 - c : c);
+        if (colUs >= 1000) delay(colUs / 1000);
+        delayMicroseconds(colUs % 1000);
+        pollBle();
+        imuTick();   // 그리는 중에도 다음 반전을 놓치지 않게
+      }
+      ledsOff();
+    } else {
+      delay(1);   // 다음 반전 대기 (IMU 샘플링은 loop 상단에서 계속)
+    }
   } else if (cfg.mode != MODE_POV) {
     idleGlow();  // TODO: 일정 시간 후 슬립 + 흔들어 깨우기
   }
