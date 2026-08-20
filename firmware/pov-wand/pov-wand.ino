@@ -1003,6 +1003,20 @@ int oledTextWidth(const char* s, int scale) {
   return n * (8 * scale + scale);
 }
 
+// 배터리 아이콘 (20x7px + 꼭지). 내부를 잔량 비율만큼 채운다
+void oledBattIcon(int x, int page, int pct) {
+  const int BODY = 18;
+  for (int c = 0; c < BODY; c++) {
+    uint8_t v = 0x41;                       // 위(bit0)/아래(bit6) 테두리
+    if (c == 0 || c == BODY - 1) v = 0x7F;  // 양쪽 벽
+    else if (c >= 2 && c < 2 + (pct * 14 + 50) / 100) v |= 0x3E;  // 채움 (14칸)
+    if (x + c < 128) oledBuf[page * 128 + x + c] |= v;
+  }
+  // 꼭지 (+극)
+  for (int c = 0; c < 2 && x + BODY + c < 128; c++)
+    oledBuf[page * 128 + x + BODY + c] |= 0x1C;
+}
+
 // 화면 갱신: 주인 이름(2배) / 시리얼 / 배터리·연결 상태
 void oledTick() {
   if (!oledOk) return;
@@ -1019,9 +1033,11 @@ void oledTick() {
     w = oledTextWidth(ownerRec.serial, 1);
     oledText(w < 128 ? (128 - w) / 2 : 0, 4, ownerRec.serial, 1);
   }
-  char line[32];
-  snprintf(line, sizeof(line), "배터리 %d%%", readBattery());
-  oledText(4, 6, line, 1);
+  int pct = readBattery();
+  oledBattIcon(4, 6, pct);
+  char line[8];
+  snprintf(line, sizeof(line), "%d%%", pct);
+  oledText(28, 6, line, 1);   // 아이콘 옆 숫자 (빼고 싶으면 이 두 줄 삭제)
   const char* st = Bluefruit.connected() ? (linkSecured ? "연결됨" : "페어링중") : "대기중";
   w = oledTextWidth(st, 1);
   oledText(128 - 4 - w, 6, st, 1);
