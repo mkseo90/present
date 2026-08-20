@@ -998,9 +998,12 @@ void tapTick() {
 // 주인 이름·배터리·연결 상태를 표시한다. 부팅 시 주소를 탐지해서 없으면 조용히 비활성.
 // ⚠ 확장보드 I2C(D4/D5)가 현재 LED 채널 4·5와 겹친다 — 핀맵 이사(A안) 확정 전까지는
 //   LED 하네스와 OLED를 동시에 물리지 말 것.
-// 2026-08-20 결정(③안): OLED 미사용 — LED가 D4/D5(I2C)를 쓰므로 동시 사용 불가하고,
-// "흔들 때 화면 볼 정신 없다". 코드는 보존 — v2(RGB 완드)에서 핀맵 정리 후 재활성 후보
-#define USE_OLED 0
+// OLED 공존 모드 (2026-08-20): SSD1306은 자체 GDDRAM으로 표시를 유지하므로
+// I2C는 "그릴 때만" 필요하다. 이를 이용해 LED(D4/D5)와 버스를 시분할 공유한다:
+//   - 화면을 다시 그릴 때만 Wire를 켜서 전송(~30ms) 후 즉시 핀을 LED로 반환
+//   - LED 토글이 우연히 유효한 I2C 패턴을 만들면 화면이 깨질 수 있으므로
+//     대기 상태에서 10초마다 다시 그려 자가 치유한다 (스윙/테스트 중엔 안 건드림)
+#define USE_OLED 1
 #if USE_OLED
 #include <Wire.h>
 bool oledOk = false;
@@ -1013,16 +1016,35 @@ void oledCmd(uint8_t c) {
   Wire.endTransmission();
 }
 
-bool oledInit() {
+// I2C 버스 점유/반환 (D4/D5를 LED와 시분할)
+void oledBusTake() {
   Wire.begin();
   Wire.setClock(400000);
+}
+void oledBusRelease() {
+  Wire.end();
+#if LED_TYPE == 3
+  // D4/D5를 LED 출력으로 복귀 (고구동 포함)
+  for (int y = 0; y < NUM_LEDS; y++) {
+    if (LED_PINS[y] == 4 || LED_PINS[y] == 5) {
+      pinMode(LED_PINS[y], OUTPUT);
+      digitalWrite(LED_PINS[y], LOW);
+    }
+  }
+  setLedDrive(true);
+#endif
+}
+
+bool oledInit() {
+  oledBusTake();
   Wire.beginTransmission(0x3C);
-  if (Wire.endTransmission() != 0) return false;   // 없음
+  if (Wire.endTransmission() != 0) { oledBusRelease(); return false; }   // 없음
   static const uint8_t seq[] = {
     0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40, 0x8D, 0x14, 0x20, 0x00,
     0xA1, 0xC8, 0xDA, 0x12, 0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6, 0xAF };
   for (uint8_t i = 0; i < sizeof(seq); i++) oledCmd(seq[i]);
   memset(oledBuf, 0, sizeof(oledBuf));
+  oledBusRelease();
   return true;
 }
 
@@ -1102,12 +1124,15 @@ void oledBattIcon(int x, int page, int pct) {
 }
 
 // 화면 갱신: 주인 이름(2배) / 시리얼 / 배터리·연결 상태
+// 대기 상태에서 10초마다만 (I2C 점유 ~30ms 후 핀을 LED로 반환 — D4/D5 시분할)
 void oledTick() {
   if (!oledOk) return;
   static uint32_t last = 0;
-  if (millis() - last < 2000) return;
-  if (sw.swinging || testHold >= 0) return;   // 잔상/테스트 중엔 I2C로 타이밍 방해 금지
+  if (last != 0 && millis() - last < 10000) return;   // 첫 회(부팅 직후)는 즉시 출력
+  if (sw.swinging || testHold >= 0) return;   // 잔상/테스트 중엔 절대 안 건드림
+  if (cfg.mode == MODE_POV) return;           // 수동 잔상 모드도 제외
   last = millis();
+  oledBusTake();
 
   memset(oledBuf, 0, sizeof(oledBuf));
   const char* name = ownerRec.valid ? ownerRec.name : "POV WAND";
@@ -1130,6 +1155,7 @@ void oledTick() {
     oledIcon(128 - 4 - 5, 6, linkSecured ? ICO_CHECK : ICO_DOTS, 5);
   }
   oledShow();
+  oledBusRelease();   // D4/D5를 LED로 반환
 }
 #endif  // USE_OLED
 
