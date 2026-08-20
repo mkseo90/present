@@ -1003,6 +1003,16 @@ int oledTextWidth(const char* s, int scale) {
   return n * (8 * scale + scale);
 }
 
+// 7px 상태 아이콘 (컬럼 바이트, bit0=위)
+static const uint8_t ICO_BT[]    = { 0x22, 0x14, 0x7F, 0x36 };   // 블루투스 룬
+static const uint8_t ICO_WAVE[]  = { 0x08, 0x14, 0x22, 0x41 };   // 전파 (대기중)
+static const uint8_t ICO_CHECK[] = { 0x10, 0x20, 0x10, 0x08, 0x04 }; // 체크 (연결됨)
+static const uint8_t ICO_DOTS[]  = { 0x40, 0x00, 0x40, 0x00, 0x40 }; // … (페어링중)
+
+void oledIcon(int x, int page, const uint8_t* d, int n) {
+  for (int c = 0; c < n && x + c < 128; c++) oledBuf[page * 128 + x + c] |= d[c];
+}
+
 // 배터리 아이콘 (20x7px + 꼭지). 내부를 잔량 비율만큼 채운다
 void oledBattIcon(int x, int page, int pct) {
   const int BODY = 18;
@@ -1038,9 +1048,13 @@ void oledTick() {
   char line[8];
   snprintf(line, sizeof(line), "%d%%", pct);
   oledText(28, 6, line, 1);   // 아이콘 옆 숫자 (빼고 싶으면 이 두 줄 삭제)
-  const char* st = Bluefruit.connected() ? (linkSecured ? "연결됨" : "페어링중") : "대기중";
-  w = oledTextWidth(st, 1);
-  oledText(128 - 4 - w, 6, st, 1);
+  // BLE 상태 아이콘 (오른쪽 정렬): 전파=대기, BT+…=페어링중, BT+✓=연결됨
+  if (!Bluefruit.connected()) {
+    oledIcon(128 - 4 - 4, 6, ICO_WAVE, 4);
+  } else {
+    oledIcon(128 - 4 - 10, 6, ICO_BT, 4);
+    oledIcon(128 - 4 - 5, 6, linkSecured ? ICO_CHECK : ICO_DOTS, 5);
+  }
   oledShow();
 }
 #endif  // USE_OLED
