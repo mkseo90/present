@@ -941,7 +941,9 @@ uint32_t swingPeriodUs() { return 20000; }  // MODE_POV(수동)에서 SET SPEED 
 // 주인 이름·배터리·연결 상태를 표시한다. 부팅 시 주소를 탐지해서 없으면 조용히 비활성.
 // ⚠ 확장보드 I2C(D4/D5)가 현재 LED 채널 4·5와 겹친다 — 핀맵 이사(A안) 확정 전까지는
 //   LED 하네스와 OLED를 동시에 물리지 말 것.
-#define USE_OLED 1
+// 2026-08-20 결정(③안): OLED 미사용 — LED가 D4/D5(I2C)를 쓰므로 동시 사용 불가하고,
+// "흔들 때 화면 볼 정신 없다". 코드는 보존 — v2(RGB 완드)에서 핀맵 정리 후 재활성 후보
+#define USE_OLED 0
 #if USE_OLED
 #include <Wire.h>
 bool oledOk = false;
