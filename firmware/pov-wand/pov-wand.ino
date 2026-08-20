@@ -1133,6 +1133,11 @@ void oledTick() {
   if (cfg.mode == MODE_POV) return;           // 수동 잔상 모드도 제외
   last = millis();
   oledBusTake();
+  // 매번 풀 재초기화: LED 토글이 만든 쓰레기 I2C가 표시 '설정'을 깨뜨렸어도 복구되게
+  static const uint8_t seq[] = {
+    0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40, 0x8D, 0x14, 0x20, 0x00,
+    0xA1, 0xC8, 0xDA, 0x12, 0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6, 0xAF };
+  for (uint8_t i = 0; i < sizeof(seq); i++) oledCmd(seq[i]);
 
   memset(oledBuf, 0, sizeof(oledBuf));
   const char* name = ownerRec.valid ? ownerRec.name : "POV WAND";
@@ -1310,7 +1315,10 @@ void idleGlow() {
   static uint16_t phase = 0;
   phase++;
   // 아래에서 위로 흐르는 물결: 한 번에 2~3개씩 켜지며 이동
+  // OLED 공존: SCL(D5) 채널은 대기 중 상시 LOW — 클럭이 안 움직이면 SDA(D4)가
+  // 토글해도 I2C 명령이 성립하지 않아 화면이 안 깨진다
   for (int y = 0; y < NUM_LEDS; y++) {
+    if (oledOk && LED_PINS[y] == 5) { digitalWrite(5, LOW); continue; }
     uint8_t d = (y + phase / 6) % NUM_LEDS;
     digitalWrite(LED_PINS[y], d < 3 ? HIGH : LOW);
   }
