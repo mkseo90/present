@@ -475,27 +475,33 @@ $("simToggle").onchange = (e) => {
   }
 };
 
-// 전체화면 (지원 브라우저에서만 버튼 노출)
-const fsRoot = document.documentElement;
-const fsReq = fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen;
-if (!fsReq) {
-  $("btnFull").style.display = "none";
-} else {
-  $("btnFull").onclick = () => {
-    const cur = document.fullscreenElement || document.webkitFullscreenElement;
-    if (cur) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-    else fsReq.call(fsRoot);
-  };
-  // 터치 기기: 첫 탭에 자동 전체화면 (사용자 조작이 있어야 브라우저가 허용)
-  if (matchMedia("(pointer: coarse)").matches) {
-    const once = () => {
-      window.removeEventListener("touchend", once);
-      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-        try { fsReq.call(fsRoot); } catch (e) {}
-      }
-    };
-    window.addEventListener("touchend", once);
+// 전체화면 — 버튼은 항상 표시하고, 누르는 순간 실제로 시도한다.
+// (능력 사전판정으로 숨겼더니 일부 브라우저에서 오판으로 사라지는 문제가 있었음.
+//  실패하면 통신 로그에 사유를 남긴다 → 설정 탭에서 확인 가능)
+function tryFullscreen() {
+  const el = document.documentElement;
+  const cur = document.fullscreenElement || document.webkitFullscreenElement;
+  try {
+    if (cur) {
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      return;
+    }
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!req) { log("·", "[fs] 이 브라우저는 전체화면 API 미지원 (스크롤로 툴바 접힘)"); return; }
+    const p = req.call(el);
+    if (p && p.catch) p.catch((e) => log("·", "[fs] 거부: " + e.message));
+  } catch (e) {
+    log("·", "[fs] 실패: " + e.message);
   }
+}
+$("btnFull").onclick = tryFullscreen;
+// 터치 기기: 첫 탭에 자동 전체화면 시도 (사용자 조작이 있어야 브라우저가 허용)
+if (matchMedia("(pointer: coarse)").matches) {
+  const once = () => {
+    window.removeEventListener("touchend", once);
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) tryFullscreen();
+  };
+  window.addEventListener("touchend", once);
 }
 
 // ---------- 관리자 모드 (헤더 로고 7번 연속 탭으로 토글) ----------
