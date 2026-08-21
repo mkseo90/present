@@ -16,6 +16,7 @@
 #endif
 #include "font8x8.h"
 #include "font8x8_kr.h"
+#include "font8x8_ext.h"   // 한글 자모(ㅋㅋ/ㅠㅠ) + ♥★♪ 등 기호
 
 #if USE_FS
 using namespace Adafruit_LittleFS_Namespace;
@@ -371,6 +372,8 @@ uint32_t nextCp(const char** pp) {
 void glyphFor(uint32_t cp, uint8_t out[8]) {
   if (cp >= 0x20 && cp < 0x7F) { memcpy(out, FONT8[cp - 0x20], 8); return; }
   if (cp >= 0xAC00 && cp <= 0xD7A3) { memcpy(out, FONT8_KR[cp - 0xAC00], 8); return; }
+  for (uint16_t i = 0; i < FONT8_EXT_COUNT; i++)   // 자모·기호 (84자, 선형 탐색으로 충분)
+    if (FONT8_EXT_CP[i] == cp) { memcpy(out, FONT8_EXT[i], 8); return; }
   memset(out, 0x81, 8); out[0] = out[7] = 0xFF;  // ▯
 }
 

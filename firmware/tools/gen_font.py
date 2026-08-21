@@ -68,4 +68,28 @@ def main():
          [chr(c) for c in range(0xAC00, 0xD7A4)],
          "한글 음절 U+AC00(가)~U+D7A3(힣). 인덱스 = 코드포인트 - 0xAC00")
 
+    # 확장 글자: 한글 자모(ㅋㅋ/ㅠㅠ용) + 자주 쓰는 기호. 코드포인트 표와 글리프 표 한 쌍
+    ext_chars = [chr(c) for c in range(0x3131, 0x3164)] + \
+                list("♥♡★☆♪♩♬←→↑↓○●◎△▲▽▼□■◇◆…‥「」『』~—·〜℃")
+    lines = [
+        "// 자동 생성 파일 — gen_font.py (Galmuri7, OFL 라이선스). 직접 수정하지 말 것",
+        "#pragma once",
+        "#include <stdint.h>",
+        "",
+        "// 확장 글자: 한글 자모(U+3131~) + 기호. FONT8_EXT_CP[i] 의 글리프 = FONT8_EXT[i]",
+        "#define FONT8_EXT_COUNT %d" % len(ext_chars),
+        "static const uint16_t FONT8_EXT_CP[FONT8_EXT_COUNT] = {",
+    ]
+    cps = ", ".join("0x%04X" % ord(ch) for ch in ext_chars)
+    lines.append("  " + cps)
+    lines.append("};")
+    lines.append("static const uint8_t FONT8_EXT[FONT8_EXT_COUNT][8] = {")
+    for ch in ext_chars:
+        cols = render_glyph(ch)
+        lines.append("  { %s }, // '%s'" % (", ".join("0x%02X" % b for b in cols), ch))
+    lines.append("};")
+    with open(base + "font8x8_ext.h", "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print("written:", base + "font8x8_ext.h", "(%d glyphs)" % len(ext_chars))
+
 main()

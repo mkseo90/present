@@ -246,6 +246,9 @@ function glyphFor(cp) {
     g.set(window.FONT8.subarray((cp - 0x20) * 8, (cp - 0x20) * 8 + 8));
   } else if (cp >= 0xAC00 && cp <= 0xD7A3 && window.FONT8_KR) {
     g.set(window.FONT8_KR.subarray((cp - 0xAC00) * 8, (cp - 0xAC00) * 8 + 8));
+  } else if (window.FONT8_EXT_CP && window.FONT8_EXT_CP.indexOf(cp) >= 0) {
+    const i = window.FONT8_EXT_CP.indexOf(cp);   // 자모(ㅋㅋ/ㅠㅠ)·기호(♥★♪…)
+    g.set(window.FONT8_EXT.subarray(i * 8, i * 8 + 8));
   } else {
     g.fill(0x81); g[0] = 0xFF; g[7] = 0xFF;
   }

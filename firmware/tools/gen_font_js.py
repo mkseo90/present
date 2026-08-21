@@ -30,7 +30,7 @@ def parse_header(path, name, expect_glyphs):
     with open(path, encoding="utf-8") as f:
         src = f.read()
 
-    start = src.index("%s[" % name)
+    start = src.index("uint8_t %s[" % name)   # 주석 속 이름 언급에 낚이지 않게 선언부를 찾는다
     body = src[src.index("{", start) + 1:]
     body = body[:body.index("\n};")]
 
@@ -52,9 +52,21 @@ def parse_header(path, name, expect_glyphs):
     return b"".join(rows)
 
 
+def parse_ext_cps(path):
+    """font8x8_ext.h 의 FONT8_EXT_CP 배열(uint16 코드포인트 목록)을 뽑는다."""
+    with open(path, encoding="utf-8") as f:
+        src = f.read()
+    start = src.index("uint16_t FONT8_EXT_CP[")
+    body = src[src.index("{", start) + 1:]
+    body = body[:body.index("}")]
+    return [int(h, 16) for h in re.findall(r"0[xX]([0-9a-fA-F]{4})", body)]
+
+
 def main():
     ascii_bin = parse_header(os.path.join(FW, "font8x8.h"), "FONT8", 95)
     kr_bin = parse_header(os.path.join(FW, "font8x8_kr.h"), "FONT8_KR", 11172)
+    ext_cps = parse_ext_cps(os.path.join(FW, "font8x8_ext.h"))
+    ext_bin = parse_header(os.path.join(FW, "font8x8_ext.h"), "FONT8_EXT", len(ext_cps))
 
     out = os.path.join(APP, "font8x8.js")
     with open(out, "w", encoding="utf-8", newline="\n") as f:
@@ -73,6 +85,9 @@ def main():
         f.write('  window.FONT8 = unb64("%s");\n' % base64.b64encode(ascii_bin).decode())
         f.write("  // 한글 음절 U+AC00~U+D7A3 (11172자). 인덱스 = 코드포인트 - 0xAC00\n")
         f.write('  window.FONT8_KR = unb64("%s");\n' % base64.b64encode(kr_bin).decode())
+        f.write("  // 확장(자모+기호): FONT8_EXT_CP[i]의 글리프 = FONT8_EXT[i*8..]\n")
+        f.write("  window.FONT8_EXT_CP = [%s];\n" % ",".join("0x%04X" % c for c in ext_cps))
+        f.write('  window.FONT8_EXT = unb64("%s");\n' % base64.b64encode(ext_bin).decode())
         f.write("})();\n")
 
     size = os.path.getsize(out)
