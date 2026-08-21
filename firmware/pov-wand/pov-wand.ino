@@ -916,7 +916,9 @@ struct Swing {
   uint32_t lastActiveMs;
   bool strokePending;   // 반전 감지됨 → 이번 스트로크에 한 번 그릴 것
 } sw = { false, -1, 0, 0, 0, 300, 0, false };
-uint32_t lastMotionMs = 0;   // 마지막으로 회전 움직임(>60dps)이 있던 시각 (탭 "멈춤" 판정용)
+uint32_t lastMotionMs = 0;   // 마지막으로 회전 움직임(>60dps)이 있던 시각
+uint32_t lastStillMs = 0;    // 마지막으로 "정지 상태"가 확인된 시각 (탭 게이트용 — 탭 자체의
+                             // 진동이 판정을 깨지 않도록 '직전'의 정지를 본다)
 
 void imuTick() {
 #if USE_IMU
@@ -931,6 +933,7 @@ void imuTick() {
 
   if (!sw.swinging) {
     if (amax > 60) lastMotionMs = millis();
+    if (millis() - lastMotionMs > 250) lastStillMs = millis();
     if (amax > SWING_ON_DPS) {
       sw.swinging = true;
       sw.axis = ai;
@@ -943,7 +946,8 @@ void imuTick() {
 
   sw.rate = g[sw.axis];
   if (fabsf(sw.rate) > SWING_ON_DPS) sw.lastActiveMs = millis();
-  if (amax > 60) lastMotionMs = millis();   // 스윙보다 약한 움직임도 기록 (탭 제스처의 "멈춤" 판정용)
+  if (amax > 60) lastMotionMs = millis();
+  if (millis() - lastMotionMs > 250) lastStillMs = millis();   // 250ms 조용했으면 "정지 확인"
   if (millis() - sw.lastActiveMs > SWING_OFF_MS) {
     sw.swinging = false; sw.axis = -1; sw.strokePending = false;
     return;
@@ -966,31 +970,38 @@ bool isSwinging() { return sw.swinging; }
 uint32_t swingPeriodUs() { return 20000; }  // MODE_POV(수동)에서 SET SPEED 0일 때의 폴백
 
 // ---- 톡톡(더블탭) 제스처: 버튼 없이 슬롯 전환 ----
+// 감지는 LSM6DS3 **하드웨어 더블탭 엔진**이 한다 (칩이 1.66kHz로 자체 감시 —
+// 소프트웨어 폴링은 1~3ms짜리 탭 충격을 놓치기 일쑤였다).
 // 발동 조건 두 가지 모두 충족 (사용자 요구):
-//   1. 멈춤 상태 — 스윙 아님 + 직전 300ms간 회전 움직임(>60dps) 없음
-//   2. 가속도 스파이크(>1.8g 초과분) 2번이 700ms 안에
+//   1. 멈춤 상태 — 스윙 아님 + "탭 직전"에 정지가 확인됐을 것 (탭 자체의 진동이
+//      판정을 깨지 않도록 lastStillMs 래치를 본다)
+//   2. 더블탭 — 칩의 TAP_SRC 레지스터 DOUBLE_TAP 비트
 bool tapCycleReq = false;
+
+void tapEngineInit() {
+#if USE_IMU
+  if (!imuOk) return;
+  imu.writeRegister(0x10, 0x60);  // CTRL1_XL: 가속도 416Hz, ±2g (탭 엔진 요구 조건)
+  imu.writeRegister(0x58, 0x8F);  // TAP_CFG: 인터럽트 en + X/Y/Z 탭 감지 + 래치
+  imu.writeRegister(0x59, 0x0C);  // TAP_THS_6D: 임계 12/31 (~750mg) — 톡톡 세기 튜닝 포인트
+  imu.writeRegister(0x5A, 0x7F);  // INT_DUR2: 더블탭 간격 최대(~540ms), quiet/shock 여유
+  imu.writeRegister(0x5B, 0x80);  // WAKE_UP_THS: 더블탭 모드 활성
+#endif
+}
 
 void tapTick() {
 #if USE_IMU
   if (!imuOk || sw.swinging) return;
-  static uint32_t lastSample = 0, refrac = 0, firstTap = 0;
-  static uint8_t taps = 0;
-  if (millis() - lastSample < 10) return;
-  lastSample = millis();
+  static uint32_t lastPoll = 0;
+  if (millis() - lastPoll < 30) return;
+  lastPoll = millis();
 
-  float ax = imu.readFloatAccelX(), ay = imu.readFloatAccelY(), az = imu.readFloatAccelZ();
-  float mag = fabsf(sqrtf(ax * ax + ay * ay + az * az) - 1.0f);  // 중력 제외한 충격량(g)
-  if (mag > 1.8f && millis() - refrac > 250) {
-    refrac = millis();
-    if (taps == 0 || millis() - firstTap > 700) {
-      // 새 시퀀스는 "멈춤 상태"에서만 시작 (조건 1)
-      if (millis() - lastMotionMs < 300) return;
-      taps = 1; firstTap = millis();
-    }
-    else if (++taps >= 2) { taps = 0; tapCycleReq = true; }
+  uint8_t src = 0;
+  imu.readRegister(&src, 0x1C);          // TAP_SRC (래치라 읽으면 해제)
+  if (src & 0x10) {                      // bit4 = DOUBLE_TAP
+    // 조건 1: 직전 1초 안에 "정지 확인"이 있었을 것 (더블탭 소요시간 감안한 창)
+    if (millis() - lastStillMs < 1000) tapCycleReq = true;
   }
-  if (taps && millis() - firstTap > 700) taps = 0;   // 두 번째 탭이 안 오면 리셋
 #endif
 }
 
@@ -1488,6 +1499,7 @@ void setup() {
   imuOk = (imu.begin() == IMU_SUCCESS);
   Serial.print("IMU: "); Serial.println(imuOk ? "ok" : "INIT FAIL");
   Serial.flush();
+  tapEngineInit();   // 하드웨어 더블탭 엔진 설정
 #endif
   setupBle();   // 내부에서 findOwner() 까지 수행한다 (광고 이름에 필요)
   seedDefaultSlots();   // 최초 1회: 기본 메시지 3종을 슬롯에 (owner 확정 후여야 함)
