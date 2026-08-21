@@ -1461,6 +1461,10 @@ void setup() {
   InternalFS.begin();
 #endif
   loadConfig();
+  // 모드는 저장값과 무관하게 항상 '자동'으로 부팅 (사용자 결정 2026-08-21).
+  // pov/idle 강제 모드는 튜닝·시연용 세션 상태일 뿐 — 재부팅하면 장난감 기본 동작으로.
+  // (밝기·속도·반전·시작슬롯은 계속 저장 유지)
+  cfg.mode = MODE_AUTO;
 #if LED_TYPE == 3
   for (int y = 0; y < NUM_LEDS; y++) {
     pinMode(LED_PINS[y], OUTPUT);
