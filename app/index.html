@@ -32,7 +32,9 @@
       <div class="preview-label">잔상 미리보기</div>
     </div>
 
-    <textarea id="sendText" rows="2" maxlength="60" placeholder="문구를 입력하세요"></textarea>
+    <!-- autocomplete/autocorrect 끄기: iOS가 URL 입력으로 착각해 '독서 목록' 제안 바를 붙이는 것 방지 -->
+    <textarea id="sendText" rows="2" maxlength="60" placeholder="문구를 입력하세요"
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
 
     <div class="color-row" id="colorRow">
       <button class="swatch" data-color="FF4FA0" style="background:#FF4FA0"></button>
@@ -142,7 +144,7 @@
 
       <div class="setting"><span>원시 명령 (PROTOCOL.md 전체)</span>
         <div class="admin-row">
-          <input id="rawCmd" placeholder="예: SET SPEED 8" style="flex:1">
+          <input id="rawCmd" placeholder="예: SET SPEED 8" style="flex:1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
           <button id="btnRaw" class="mini send">전송</button>
         </div>
       </div>
