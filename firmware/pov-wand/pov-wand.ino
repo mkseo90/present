@@ -998,9 +998,15 @@ void tapTick() {
 
   uint8_t src = 0;
   imu.readRegister(&src, 0x1C);          // TAP_SRC (래치라 읽으면 해제)
-  if (src & 0x10) {                      // bit4 = DOUBLE_TAP
+  if (src & 0x30) {                      // bit5=SINGLE_TAP, bit4=DOUBLE_TAP
+    Serial.print("[tap] TAP_SRC=0x"); Serial.print(src, HEX);
+    Serial.print(" still="); Serial.println(millis() - lastStillMs);
+    Serial.flush();
+  }
+  if (src & 0x10) {                      // DOUBLE_TAP
     // 조건 1: 직전 1초 안에 "정지 확인"이 있었을 것 (더블탭 소요시간 감안한 창)
     if (millis() - lastStillMs < 1000) tapCycleReq = true;
+    else Serial.println("[tap] blocked by still-gate");
   }
 #endif
 }
@@ -1598,6 +1604,8 @@ void loop() {
       n = n % MAX_SLOTS + 1;
       if (loadSlot(n)) break;
     }
+    Serial.print("[tap] cycle -> slot "); Serial.println(currentSlot);
+    Serial.flush();
     if (press) delay(30); // 임시 디바운스
   }
 
