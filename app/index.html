@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri@latest/dist/galmuri.css">
 <!-- 캐시버스터: app.js/style.css 고칠 때마다 ?v= 숫자를 올릴 것 (GitHub Pages가 10분 캐시) -->
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 
@@ -32,9 +32,11 @@
       <div class="preview-label">잔상 미리보기</div>
     </div>
 
-    <!-- autocomplete/autocorrect 끄기: iOS가 URL 입력으로 착각해 '독서 목록' 제안 바를 붙이는 것 방지 -->
-    <textarea id="sendText" rows="2" maxlength="60" placeholder="문구를 입력하세요"
-      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+    <!-- contenteditable 사용: 표준 입력칸(textarea)이면 iOS가 '독서 목록' 등 제안 바를
+         붙인다 — 자유 편집 영역에는 OS 자동완성 UI가 개입하지 않는다 -->
+    <div id="sendText" class="editbox" contenteditable="true" enterkeyhint="done"
+      autocorrect="off" autocapitalize="off" spellcheck="false"
+      data-ph="문구를 입력하세요"></div>
 
     <!-- 기호 키보드: 폰 자판에 없는 특수문자를 탭 한 번으로 입력 (폰트 지원 문자만) -->
     <div class="sym-row" id="symRow">
@@ -184,7 +186,7 @@
   <button data-tab="settings">⚙️<span>설정</span></button>
 </nav>
 
-<script src="font8x8.js?v=14"></script>
-<script src="app.js?v=14"></script>
+<script src="font8x8.js?v=15"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

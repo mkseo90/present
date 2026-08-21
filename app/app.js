@@ -281,7 +281,7 @@ function colorWidth(text) {
 }
 
 function renderPreview() {
-  const text = $("sendText").value || "안녕";
+  const text = getSendText() || "안녕";
   // 단색 완드는 기기가 알려준 LED 개수만큼만 (bit0부터). RGB 완드는 8행 전체
   const H = state.mono ? state.ledCount : 8;
   const { cols, truncated } = textToColumns(text);
@@ -421,39 +421,54 @@ $("colorRow").addEventListener("click", (e) => {
 });
 document.querySelector('.swatch[data-color="FF4FA0"]').classList.add("on");
 
-$("sendText").addEventListener("input", renderPreview);
+// contenteditable 입력창 헬퍼: 텍스트 읽기/쓰기 (줄바꿈은 공백으로)
+function getSendText() {
+  return $("sendText").innerText.replace(/\n/g, " ").trim();
+}
+function setSendText(t) {
+  $("sendText").textContent = t;
+  renderPreview();
+}
+
+$("sendText").addEventListener("input", () => {
+  // 최대 60자 제한 (textarea maxlength 대체)
+  const el = $("sendText");
+  if (el.textContent.length > 60) el.textContent = el.textContent.slice(0, 60);
+  renderPreview();
+});
+// Enter = 입력 종료 (줄바꿈 없는 한 줄 입력)
+$("sendText").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("sendText").blur(); }
+});
 
 // 기호 키보드: 커서 위치에 삽입 (폰 자판에 없는 ♥★♪ 등)
 document.querySelectorAll("#symRow .sym").forEach((b) => {
+  b.addEventListener("mousedown", (e) => e.preventDefault());  // 입력창 포커스 유지
   b.addEventListener("click", (e) => {
     e.preventDefault();
     const el = $("sendText");
-    const ch = b.textContent;
-    const s = el.selectionStart ?? el.value.length;
-    const t = el.selectionEnd ?? s;
-    if (el.value.length >= el.maxLength) return;
-    el.value = el.value.slice(0, s) + ch + el.value.slice(t);
-    el.selectionStart = el.selectionEnd = s + ch.length;
-    el.dispatchEvent(new Event("input"));
+    if (el.textContent.length >= 60) return;
+    el.focus();
+    document.execCommand("insertText", false, b.textContent);
   });
 });
 $("gradA").addEventListener("input", renderPreview);
 $("gradB").addEventListener("input", renderPreview);
 
 $("btnShow").onclick = () => {
-  const text = $("sendText").value.trim();
+  const text = getSendText();
   if (!text) return;
   sendLine(`SHOW ${currentColorSpec()} ${text}`).catch(() => {});
 };
 
 $("btnAddPreset").onclick = () => {
-  const text = $("sendText").value.trim();
+  const text = getSendText();
   if (!text) { alert("먼저 문구를 입력하세요"); return; }
   setPresets([...getPresets(), { color: currentColorSpec(), text }]);
 };
 
 $("btnSaveNew").onclick = () => {
-  const text = $("sendText").value.trim();
+  const text = getSendText();
   if (!text) { alert("보내기 탭에서 문구를 먼저 입력하세요"); return; }
   const used = new Set(state.slots.map((s) => s.n));
   let n = 1;
