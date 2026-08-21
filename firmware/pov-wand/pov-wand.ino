@@ -1042,8 +1042,12 @@ bool oledInit() {
   static const uint8_t seq[] = {
     0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40, 0x8D, 0x14, 0x20, 0x00,
     0xA1, 0xC8, 0xDA, 0x12, 0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6, 0xAF };
-  for (uint8_t i = 0; i < sizeof(seq); i++) oledCmd(seq[i]);
+  // 마지막 명령(0xAF=표시 켜기) 전에 화면 메모리부터 지운다 —
+  // GDDRAM은 전원 인가 시 쓰레기값이라 그냥 켜면 노이즈가 그대로 보인다
+  for (uint8_t i = 0; i < sizeof(seq) - 1; i++) oledCmd(seq[i]);
   memset(oledBuf, 0, sizeof(oledBuf));
+  oledShow();
+  oledCmd(0xAF);
   oledBusRelease();
   return true;
 }
@@ -1123,20 +1127,8 @@ void oledBattIcon(int x, int page, int pct) {
     oledBuf[page * 128 + x + BODY + c] |= 0x1C;
 }
 
-// 화면 갱신: 주인 이름(2배) / 시리얼 / 배터리·연결 상태
-// 대기 상태에서 10초마다만 (I2C 점유 ~30ms 후 핀을 LED로 반환 — D4/D5 시분할)
-void oledTick() {
-  if (!oledOk) return;
-  static uint32_t last = 0;
-  static bool wasSwinging = false;
-  if (sw.swinging || testHold >= 0) { wasSwinging = true; return; }  // 잔상/테스트 중 금지
-  if (cfg.mode == MODE_POV) { wasSwinging = true; return; }          // 수동 잔상도 금지
-  // 그리는 시점: ①부팅 직후 ②스윙/테스트가 막 끝났을 때(즉시 복구) ③대기 10초마다
-  bool justStopped = wasSwinging;
-  wasSwinging = false;
-  if (!justStopped && last != 0 && millis() - last < 10000) return;
-  if (justStopped) delay(50);   // 스윙 종료 직후 잔여 토글이 가라앉을 시간
-  last = millis();
+// 실제 그리기 (게이팅 없음 — 호출자가 안전한 시점을 보장할 것)
+void oledRender() {
   oledBusTake();
   // 매번 풀 재초기화: LED 토글이 만든 쓰레기 I2C가 표시 '설정'을 깨뜨렸어도 복구되게
   static const uint8_t seq[] = {
@@ -1166,6 +1158,20 @@ void oledTick() {
   }
   oledShow();
   oledBusRelease();   // D4/D5를 LED로 반환
+}
+
+// 화면 갱신 게이팅: ①스윙/테스트/수동잔상 중 금지 ②끝난 직후 즉시 복구 ③대기 10초마다
+void oledTick() {
+  if (!oledOk) return;
+  static uint32_t last = 0;
+  static bool wasBusy = false;
+  if (sw.swinging || testHold >= 0 || cfg.mode == MODE_POV) { wasBusy = true; return; }
+  bool justStopped = wasBusy;
+  wasBusy = false;
+  if (!justStopped && last != 0 && millis() - last < 10000) return;
+  if (justStopped) delay(50);   // 종료 직후 잔여 토글이 가라앉을 시간
+  last = millis();
+  oledRender();
 }
 #endif  // USE_OLED
 
@@ -1491,6 +1497,11 @@ void setup() {
     ColorSpec cs; cs.type = ColorSpec::RAINBOW;
     renderText("HELLO", cs);   // 미등록 보드 + 빈 슬롯일 때 기본 콘텐츠
   }
+#if USE_OLED
+  // 부팅 첫 화면은 모드와 무관하게 무조건 그린다 (아직 LED 토글 전이라 항상 안전).
+  // 이후 갱신은 oledTick 게이팅을 따른다 — 수동 잔상(pov) 모드에선 이 화면이 그대로 유지됨
+  if (oledOk) oledRender();
+#endif
   Serial.println("POV Wand ready");
 }
 
