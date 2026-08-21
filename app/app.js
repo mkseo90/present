@@ -422,6 +422,21 @@ $("colorRow").addEventListener("click", (e) => {
 document.querySelector('.swatch[data-color="FF4FA0"]').classList.add("on");
 
 $("sendText").addEventListener("input", renderPreview);
+
+// 기호 키보드: 커서 위치에 삽입 (폰 자판에 없는 ♥★♪ 등)
+document.querySelectorAll("#symRow .sym").forEach((b) => {
+  b.addEventListener("click", (e) => {
+    e.preventDefault();
+    const el = $("sendText");
+    const ch = b.textContent;
+    const s = el.selectionStart ?? el.value.length;
+    const t = el.selectionEnd ?? s;
+    if (el.value.length >= el.maxLength) return;
+    el.value = el.value.slice(0, s) + ch + el.value.slice(t);
+    el.selectionStart = el.selectionEnd = s + ch.length;
+    el.dispatchEvent(new Event("input"));
+  });
+});
 $("gradA").addEventListener("input", renderPreview);
 $("gradB").addEventListener("input", renderPreview);
 

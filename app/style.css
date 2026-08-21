@@ -71,6 +71,19 @@ textarea {
 }
 textarea:focus { outline: none; border-color: var(--violet); }
 
+.sym-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.sym {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--yellow);
+  font-size: 18px;
+  width: 40px;
+  height: 36px;
+  cursor: pointer;
+}
+.sym:active { background: var(--card2); transform: scale(0.94); }
+
 .color-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .swatch {
   width: 30px; height: 30px;
