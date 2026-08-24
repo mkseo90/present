@@ -441,6 +441,17 @@ $("sendText").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); $("sendText").blur(); }
 });
 
+// 키보드가 올라오면(특히 iOS: 주소창·북마크바까지 같이 떠서 화면을 다 먹는다)
+// 입력창을 화면 맨 위로 끌어올려 미리보기·기호 버튼이 키보드 위에 보이게 한다
+function keepEditVisible() {
+  if (document.activeElement !== $("sendText")) return;
+  setTimeout(() => {
+    document.querySelector(".preview-box").scrollIntoView({ block: "start", behavior: "smooth" });
+  }, 250);
+}
+$("sendText").addEventListener("focus", keepEditVisible);
+if (window.visualViewport) window.visualViewport.addEventListener("resize", keepEditVisible);
+
 // 기호 키보드: 커서 위치에 삽입 (폰 자판에 없는 ♥★♪ 등)
 document.querySelectorAll("#symRow .sym").forEach((b) => {
   b.addEventListener("mousedown", (e) => e.preventDefault());  // 입력창 포커스 유지
