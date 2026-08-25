@@ -922,6 +922,7 @@ struct Swing {
   uint32_t lastActiveMs;
   bool strokePending;   // 반전 감지됨 → 이번 스트로크에 한 번 그릴 것
 } sw = { false, -1, 0, 0, 0, 300, 0, false };
+int8_t povDir = 1;           // 수동(연속) 잔상용 실시간 방향 — 약한 스윙에서도 추적
 uint32_t lastMotionMs = 0;   // 마지막으로 회전 움직임(>60dps)이 있던 시각
 uint32_t lastStillMs = 0;    // 마지막으로 "정지 상태"가 확인된 시각 (탭 게이트용 — 탭 자체의
                              // 진동이 판정을 깨지 않도록 '직전'의 정지를 본다)
@@ -936,6 +937,13 @@ void imuTick() {
   float g[3] = { imu.readFloatGyroX(), imu.readFloatGyroY(), imu.readFloatGyroZ() };
   float amax = 0; int ai = 0;
   for (int i = 0; i < 3; i++) { float a = fabsf(g[i]); if (a > amax) { amax = a; ai = i; } }
+
+  // 수동(연속) 잔상 모드용 실시간 방향: 스윙 임계 미만의 움직임에서도 방향만은 따라간다.
+  // 축은 스윙 중이면 지배 축을, 아니면 이번 샘플의 최대 축을 쓴다
+  {
+    int a2 = (sw.swinging && sw.axis >= 0) ? sw.axis : ai;
+    if (fabsf(g[a2]) > 40) povDir = g[a2] > 0 ? 1 : -1;
+  }
 
   if (!sw.swinging) {
     if (amax > 60) lastMotionMs = millis();
@@ -1616,10 +1624,12 @@ void loop() {
   }
 
   if (cfg.mode == MODE_POV && content.cols > 0) {
-    // 수동 잔상: SET SPEED 간격으로 연속 반복 (IMU 무시, 튜닝/시연용)
+    // 수동 잔상: SET SPEED 간격으로 연속 반복.
+    // 방향은 매 프레임 IMU로 보정 — 왕복 어느 쪽에서 봐도 글자가 바로 보인다
     uint32_t colUs = cfg.speedUs ? cfg.speedUs : swingPeriodUs() / content.cols;
+    bool rev = (povDir < 0) != (cfg.flip != 0);
     for (uint16_t c = 0; c < content.cols; c++) {
-      outputColumn(cfg.flip ? content.cols - 1 - c : c);
+      outputColumn(rev ? content.cols - 1 - c : c);
       if (colUs >= 1000) delay(colUs / 1000);          // ms 단위는 RTOS 양보(yield)하는 delay로
       delayMicroseconds(colUs % 1000);
       pollBle();
@@ -1630,7 +1640,10 @@ void loop() {
     // 자동 잔상: 방향 반전마다 한 번씩, 스트로크 시간의 70%에 맞춰 그린다
     if (sw.strokePending) {
       sw.strokePending = false;
-      uint32_t colUs = (uint32_t)sw.strokeMs * 700 / content.cols;   // ms→µs×0.7
+      // 속도 슬라이더(SET SPEED)가 설정돼 있으면 그 고정 간격을 쓴다 (실측: 2~8ms가 최적).
+      // 0(자동)일 때만 스트로크 길이에 비례해 계산
+      uint32_t colUs = cfg.speedUs ? cfg.speedUs
+                                   : (uint32_t)sw.strokeMs * 700 / content.cols;
       colUs = constrain(colUs, 200, 30000);
       // 스트로크 방향에 따라 자동 반전. cfg.flip은 기준(어느 쪽이 정방향인지) 뒤집기
       bool rev = (sw.dir < 0) != (cfg.flip != 0);
