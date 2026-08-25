@@ -217,6 +217,7 @@ struct Config {
   uint16_t speedUs = 0;       // 0 = IMU 자동
   uint8_t startSlot = 1;
   uint8_t flip = 0;           // 1 = 컬럼 역순 출력 (스윙 방향에 따른 좌우반전 보정)
+  uint8_t swingDps = 70;      // 스윙 감지 문턱(도/초). 낮을수록 살살 흔들어도 잔상 (SET SWING)
 } cfg;
 
 // 표시 버퍼: 컬럼당 8픽셀 × RGB
@@ -843,6 +844,8 @@ void handleLine(char* line) {
       cfg.speedUs = atoi(val) * 1000;
     } else if (strcmp(what, "FLIP") == 0) {
       cfg.flip = atoi(val) ? 1 : 0;
+    } else if (strcmp(what, "SWING") == 0) {
+      cfg.swingDps = constrain(atoi(val), 30, 250);   // 낮을수록 예민 (기본 70)
     } else { reply("ERR 1 unknown key"); return; }
     cfgDirtyAt = millis();
     reply("OK SET");
@@ -905,8 +908,8 @@ LSM6DS3 imu(I2C_MODE, 0x6A);
 #endif
 bool imuOk = false;
 
-// 튜닝 파라미터 (IMU 명령으로 실측하며 조정)
-#define SWING_ON_DPS  120.0f   // 이 각속도(도/초) 이상이면 "흔드는 중"
+// 튜닝 파라미터. 스윙 문턱은 cfg.swingDps 로 런타임 조절 (SET SWING <dps>)
+#define SWING_ON_DPS  ((float)cfg.swingDps)
 #define SWING_OFF_MS  700      // 이 시간 동안 잠잠하면 대기 모드로
 
 struct Swing {
@@ -961,7 +964,7 @@ void imuTick() {
   if (d != 0 && d != sw.dir) {
     uint32_t now = millis();
     uint32_t dt = now - sw.lastRevMs;
-    if (dt > 80 && dt < 2000) sw.strokeMs = dt;   // 말도 안 되는 값은 버림
+    if (dt > 80 && dt < 2500) sw.strokeMs = dt;   // 느린 스윙까지 허용 (말도 안 되는 값만 버림)
     sw.lastRevMs = now;
     sw.dir = d;
     sw.strokePending = true;

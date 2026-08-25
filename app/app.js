@@ -568,6 +568,9 @@ $("speed").oninput = (e) =>
   $("speedVal").textContent = e.target.value == 0 ? "자동" : e.target.value + "ms";
 $("speed").onchange = (e) => sendLine(`SET SPEED ${e.target.value}`).catch(() => {});
 
+$("swing").oninput = (e) => $("swingVal").textContent = e.target.value;
+$("swing").onchange = (e) => sendLine(`SET SWING ${e.target.value}`).catch(() => {});
+
 document.querySelectorAll("[data-cmd]").forEach((b) => {
   b.onclick = () => sendLine(b.dataset.cmd).catch(() => {});
 });
