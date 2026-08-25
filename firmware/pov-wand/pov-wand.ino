@@ -1624,18 +1624,33 @@ void loop() {
   }
 
   if (cfg.mode == MODE_POV && content.cols > 0) {
-    // 수동 잔상: SET SPEED 간격으로 연속 반복.
-    // 방향은 매 프레임 IMU로 보정 — 왕복 어느 쪽에서 봐도 글자가 바로 보인다
+    // 수동 잔상: SET SPEED 간격으로 반복하되 스윙에 반쯤 동기화한다.
+    //  - 방향: 스트로크 단위로 안정된 sw.dir 우선 (왕복 양쪽에서 바로 보이게)
+    //  - 방향이 바뀌면 프레임 즉시 중단 → 반쯤 반전된 얼룩 방지, 새 방향으로 재시작
+    //  - 문장 사이 빈 틈(문장 폭의 1/3) → 반복 출력이 겹쳐 보이는 것 방지
     uint32_t colUs = cfg.speedUs ? cfg.speedUs : swingPeriodUs() / content.cols;
-    bool rev = (povDir < 0) != (cfg.flip != 0);
+    int8_t fdir = sw.swinging ? sw.dir : povDir;
+    bool rev = (fdir < 0) != (cfg.flip != 0);
     for (uint16_t c = 0; c < content.cols; c++) {
       outputColumn(rev ? content.cols - 1 - c : c);
       if (colUs >= 1000) delay(colUs / 1000);          // ms 단위는 RTOS 양보(yield)하는 delay로
       delayMicroseconds(colUs % 1000);
       pollBle();
+      if ((c & 7) == 7) {                              // 8컬럼마다 방향 점검
+        imuTick();
+        int8_t nd = sw.swinging ? sw.dir : povDir;
+        if (nd != fdir) break;                         // 스윙이 반전됨 → 프레임 중단
+      }
     }
     ledsOff();
-    delay(2);  // 프레임 사이 BLE/USB 태스크에 숨 쉴 틈 (busy-wait 독점 방지)
+    // 문장 사이 빈 틈 (콘텐츠 폭의 1/3, 8~40컬럼 분량)
+    uint16_t gapCols = constrain(content.cols / 3, 8, 40);
+    for (uint16_t gc = 0; gc < gapCols; gc++) {
+      if (colUs >= 1000) delay(colUs / 1000);
+      delayMicroseconds(colUs % 1000);
+      pollBle();
+      imuTick();
+    }
   } else if (cfg.mode == MODE_AUTO && sw.swinging && content.cols > 0) {
     // 자동 잔상: 방향 반전마다 한 번씩, 스트로크 시간의 70%에 맞춰 그린다
     if (sw.strokePending) {
