@@ -446,7 +446,10 @@ $("sendText").addEventListener("keydown", (e) => {
 function keepEditVisible() {
   if (document.activeElement !== $("sendText")) return;
   setTimeout(() => {
-    document.querySelector(".preview-box").scrollIntoView({ block: "start", behavior: "smooth" });
+    // 입력창을 화면 위쪽으로. 주의: 페이지 최상단(scrollTop=0)까지 올리면 Bluefy가
+    // 페이지 위에 깔아둔 북마크 바가 드러난다 — 입력창 기준이면 살짝 내려간 채 유지되어
+    // 바가 가려진 상태로 입력창+기호 버튼이 키보드 위에 보인다
+    $("sendText").scrollIntoView({ block: "start", behavior: "smooth" });
   }, 250);
 }
 $("sendText").addEventListener("focus", keepEditVisible);
