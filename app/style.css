@@ -13,7 +13,9 @@
   --danger: #FF6B6B;
 }
 * { box-sizing: border-box; margin: 0; -webkit-tap-highlight-color: transparent; }
-html, body { height: 100%; }
+html, body { height: 100%; overscroll-behavior: none; }
+/* 헤더·탭바를 끌어도 페이지(웹뷰 창)가 딸려 올라가지 않게 — 고무줄 튕김이 Bluefy 바를 깜빡이게 한다 */
+header, nav { touch-action: none; }
 html { background: var(--bg); }
 body {
   background: var(--bg);
@@ -45,7 +47,8 @@ header {
 .chip-connect { border-color: var(--teal); color: var(--teal); font-weight: 600; }
 .chip-connect.connected { background: var(--teal); color: #063A2E; }
 
-main { flex: 1; overflow-y: auto; padding: 4px 16px 16px; }
+/* overscroll-behavior: main 스크롤이 끝에 닿아도 창(웹뷰)으로 튕김이 전파되지 않게 */
+main { flex: 1; overflow-y: auto; padding: 4px 16px 16px; overscroll-behavior: contain; }
 /* 키보드가 열려 있는 동안: 문서에 스크롤 여유를 만들어 창(웹뷰)을 아래로 내려둘 수 있게 한다.
    Bluefy 상단 북마크 바는 웹뷰 창 스크롤이 최상단일 때 나타난다 — main 내부 스크롤과는 무관.
    주의: padding(border-box)·margin(overflow 미포함)·스페이서(flex:1인 main이 흡수)로는 문서가

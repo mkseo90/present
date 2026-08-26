@@ -486,6 +486,11 @@ document.addEventListener("focusout", () => {
   setTimeout(() => { if (!isEditable(document.activeElement)) kbChanged(false); }, 60);
 });
 window.addEventListener("scroll", pinWindowDown, { passive: true });
+// 헤더·탭바에서 시작한 드래그가 창을 끌어올리지 않게 (CSS touch-action의 2차 방어선 —
+// iOS는 이미 스크롤 중 합류하는 터치 등 예외가 있어 JS로도 막는다)
+document.querySelectorAll("header, nav").forEach((el) => {
+  el.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+});
 if (window.visualViewport) window.visualViewport.addEventListener("resize", () => {
   // 키보드 판정: 보이는 영역이 레이아웃 뷰포트의 3/4 미만이면 키보드가 떠 있는 것
   const layoutH = document.documentElement.clientHeight || window.innerHeight;
@@ -559,16 +564,19 @@ $("simToggle").onchange = (e) => {
 // 전체화면 — 버튼은 항상 표시하고, 누르는 순간 실제로 시도한다.
 // (능력 사전판정으로 숨겼더니 일부 브라우저에서 오판으로 사라지는 문제가 있었음.
 //  실패하면 통신 로그에 사유를 남긴다 → 설정 탭에서 확인 가능)
+let fsWanted = true;  // 사용자가 ⛶로 직접 끄기 전까지는 전체화면을 유지하려는 상태
 function tryFullscreen() {
   const el = document.documentElement;
   const cur = document.fullscreenElement || document.webkitFullscreenElement;
   try {
     if (cur) {
+      fsWanted = false;  // 직접 끈 것 — 자동 재진입 중단
       (document.exitFullscreen || document.webkitExitFullscreen).call(document);
       return;
     }
     const req = el.requestFullscreen || el.webkitRequestFullscreen;
-    if (!req) { log("·", "[fs] 이 브라우저는 전체화면 API 미지원 (스크롤로 툴바 접힘)"); return; }
+    if (!req) { fsWanted = false; log("·", "[fs] 이 브라우저는 전체화면 API 미지원 (스크롤로 툴바 접힘)"); return; }
+    fsWanted = true;
     const p = req.call(el);
     if (p && p.catch) p.catch((e) => log("·", "[fs] 거부: " + e.message));
   } catch (e) {
@@ -576,13 +584,17 @@ function tryFullscreen() {
   }
 }
 $("btnFull").onclick = tryFullscreen;
-// 터치 기기: 첫 탭에 자동 전체화면 시도 (사용자 조작이 있어야 브라우저가 허용)
+// 터치 기기: 전체화면 유지 — 첫 탭에 자동 진입하고, 키보드가 열려서 강제로 풀리면
+// (iOS는 입력 중 전체화면 불가) 키보드가 닫힌 뒤 다음 탭에서 자동 재진입한다.
+// 입력 중에는 시도하지 않는다 — 전체화면 요청이 키보드를 닫아버리기 때문
 if (matchMedia("(pointer: coarse)").matches) {
-  const once = () => {
-    window.removeEventListener("touchend", once);
-    if (!document.fullscreenElement && !document.webkitFullscreenElement) tryFullscreen();
-  };
-  window.addEventListener("touchend", once);
+  window.addEventListener("touchend", (e) => {
+    if (!fsWanted) return;
+    if (document.fullscreenElement || document.webkitFullscreenElement) return;
+    if (e.target.closest && e.target.closest("#btnFull")) return;  // 토글 버튼은 onclick에 맡긴다
+    if (kbOpen || isEditable(document.activeElement) || isEditable(e.target)) return;
+    tryFullscreen();
+  });
 }
 
 // ---------- 관리자 모드 (헤더 로고 7번 연속 탭으로 토글) ----------
