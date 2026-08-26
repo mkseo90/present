@@ -14,8 +14,8 @@
 }
 * { box-sizing: border-box; margin: 0; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; overscroll-behavior: none; }
-/* 헤더·탭바를 끌어도 페이지(웹뷰 창)가 딸려 올라가지 않게 — 고무줄 튕김이 Bluefy 바를 깜빡이게 한다 */
-header, nav { touch-action: none; }
+/* 헤더·탭바 드래그 차단은 JS touchmove preventDefault로만 한다 —
+   touch-action:none은 iOS에서 버튼 click 이벤트까지 먹어버리는 사례가 있음 (v21 회귀) */
 html { background: var(--bg); }
 body {
   background: var(--bg);

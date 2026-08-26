@@ -591,8 +591,11 @@ if (matchMedia("(pointer: coarse)").matches) {
   window.addEventListener("touchend", (e) => {
     if (!fsWanted) return;
     if (document.fullscreenElement || document.webkitFullscreenElement) return;
-    if (e.target.closest && e.target.closest("#btnFull")) return;  // 토글 버튼은 onclick에 맡긴다
-    if (kbOpen || isEditable(document.activeElement) || isEditable(e.target)) return;
+    // iOS는 터치 target이 텍스트 노드일 수 있다 — 요소로 정규화한 뒤 판정
+    let t = e.target;
+    if (t && t.nodeType === 3) t = t.parentElement;
+    if (t && t.closest && t.closest("#btnFull")) return;  // 토글 버튼은 onclick에 맡긴다
+    if (kbOpen || isEditable(document.activeElement) || isEditable(t)) return;
     tryFullscreen();
   });
 }
