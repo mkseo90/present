@@ -595,7 +595,15 @@ if (matchMedia("(pointer: coarse)").matches) {
     let t = e.target;
     if (t && t.nodeType === 3) t = t.parentElement;
     if (t && t.closest && t.closest("#btnFull")) return;  // 토글 버튼은 onclick에 맡긴다
-    if (kbOpen || isEditable(document.activeElement) || isEditable(t)) return;
+    // 키보드 판정은 상태 변수가 아니라 지금 이 순간의 실측으로 — 이벤트를 놓쳐
+    // kbOpen이 true에 잠기면 전체화면 복귀가 영영 안 되는 사고 방지
+    const vv = window.visualViewport;
+    const liveKb = vv ? vv.height < (document.documentElement.clientHeight || window.innerHeight) * 0.75 : kbOpen;
+    if (!liveKb && kbOpen) kbChanged(false);  // 상태 어긋남 복구
+    if (liveKb || isEditable(t)) return;
+    // iOS는 입력창 밖을 탭해도 포커스가 안 풀리는 경우가 있다 — 키보드가 닫혔는데
+    // 편집요소에 포커스가 남아 있으면 정리하고 진행
+    if (isEditable(document.activeElement)) document.activeElement.blur();
     tryFullscreen();
   });
 }
