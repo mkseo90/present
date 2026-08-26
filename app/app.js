@@ -565,6 +565,7 @@ $("simToggle").onchange = (e) => {
 // (능력 사전판정으로 숨겼더니 일부 브라우저에서 오판으로 사라지는 문제가 있었음.
 //  실패하면 통신 로그에 사유를 남긴다 → 설정 탭에서 확인 가능)
 let fsWanted = true;  // 사용자가 ⛶로 직접 끄기 전까지는 전체화면을 유지하려는 상태
+let fsFails = 0;      // 연속 진입 실패 횟수 — 2회면 자동 재시도 포기
 function tryFullscreen() {
   const el = document.documentElement;
   const cur = document.fullscreenElement || document.webkitFullscreenElement;
@@ -575,13 +576,42 @@ function tryFullscreen() {
       return;
     }
     const req = el.requestFullscreen || el.webkitRequestFullscreen;
-    if (!req) { fsWanted = false; log("·", "[fs] 이 브라우저는 전체화면 API 미지원 (스크롤로 툴바 접힘)"); return; }
+    if (!req) {
+      fsWanted = false;
+      const m = "[fs] 전체화면 API 없음 — 브라우저(Bluefy) 자체 제한";
+      log("·", m); fsToast(m);
+      return;
+    }
     fsWanted = true;
+    let lastErr = "";
     const p = req.call(el);
-    if (p && p.catch) p.catch((e) => log("·", "[fs] 거부: " + e.message));
+    if (p && p.catch) p.catch((e) => { lastErr = e.name + ": " + e.message; });
+    // 실제로 들어갔는지 사후 확인 — 실패 사유를 화면 토스트로 (관리자 확인용)
+    setTimeout(() => {
+      if (document.fullscreenElement || document.webkitFullscreenElement) return;
+      const m = `[fs] 진입 실패 — ${lastErr || "사유 미보고"} (표준:${el.requestFullscreen ? "O" : "X"} webkit:${el.webkitRequestFullscreen ? "O" : "X"} 허용:${document.fullscreenEnabled}/${document.webkitFullscreenEnabled})`;
+      log("·", m); fsToast(m);
+      if (++fsFails >= 2) fsWanted = false;  // 계속 실패하면 자동 재시도(와 토스트) 중단
+    }, 700);
   } catch (e) {
-    log("·", "[fs] 실패: " + e.message);
+    const m = "[fs] 예외: " + e.message;
+    log("·", m); fsToast(m);
   }
+}
+// 실패 사유를 화면에 직접 보여주는 토스트 (로그 열어보지 않아도 되게)
+let fsToastEl = null;
+function fsToast(msg) {
+  if (!fsToastEl) {
+    fsToastEl = document.createElement("div");
+    fsToastEl.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:72px;" +
+      "z-index:9999;background:#2A2740;color:#FFD644;padding:9px 14px;border-radius:10px;" +
+      "font-size:12px;max-width:92%;box-shadow:0 4px 14px rgba(0,0,0,.5);word-break:break-all";
+    document.body.appendChild(fsToastEl);
+  }
+  fsToastEl.textContent = msg;
+  fsToastEl.style.display = "block";
+  clearTimeout(fsToastEl._t);
+  fsToastEl._t = setTimeout(() => (fsToastEl.style.display = "none"), 6000);
 }
 $("btnFull").onclick = tryFullscreen;
 // 터치 기기: 전체화면 유지 — 첫 탭에 자동 진입하고, 키보드가 열려서 강제로 풀리면
