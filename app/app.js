@@ -446,14 +446,51 @@ $("sendText").addEventListener("keydown", (e) => {
 function keepEditVisible() {
   if (document.activeElement !== $("sendText")) return;
   setTimeout(() => {
-    // 입력창을 화면 위쪽으로. 주의: 페이지 최상단(scrollTop=0)까지 올리면 Bluefy가
-    // 페이지 위에 깔아둔 북마크 바가 드러난다 — 입력창 기준이면 살짝 내려간 채 유지되어
-    // 바가 가려진 상태로 입력창+기호 버튼이 키보드 위에 보인다
     $("sendText").scrollIntoView({ block: "start", behavior: "smooth" });
   }, 250);
 }
 $("sendText").addEventListener("focus", keepEditVisible);
 if (window.visualViewport) window.visualViewport.addEventListener("resize", keepEditVisible);
+
+// ── Bluefy 북마크 바 숨기기 ─────────────────────────────────────────
+// 바는 "웹뷰 창 스크롤이 최상단"일 때 나타난다. 이 앱은 main 내부 스크롤 구조라
+// 위 scrollIntoView는 창을 전혀 움직이지 못했다(v18·v19 수정이 안 먹힌 이유).
+// → 키보드가 열리면 body에 여유(padding)를 만들고 창 자체를 아래로 내려 바를 접는다.
+//   iOS 자체 포커스 스크롤이 창을 도로 최상단으로 올려놓을 수 있어 잠시 반복 보정하고,
+//   키보드가 떠 있는 동안 창이 최상단으로 돌아가면 즉시 다시 내린다.
+const KB_SCROLL = 72;
+// Bluefy(iOS) 전용 — 안드로이드/데스크톱은 상단 바 문제가 없으니 건드리지 않는다
+const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+let kbOpen = false;
+function isEditable(el) {
+  return !!el && (el.isContentEditable || el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+}
+function pinWindowDown() {
+  if (!kbOpen) return;
+  if ((window.scrollY || window.pageYOffset || 0) < KB_SCROLL - 8) window.scrollTo(0, KB_SCROLL);
+}
+function kbChanged(open) {
+  if (!IS_IOS || open === kbOpen) return;
+  kbOpen = open;
+  document.body.classList.toggle("kb-open", open);
+  if (open) {
+    let n = 0;
+    const t = setInterval(() => { pinWindowDown(); if (!kbOpen || ++n >= 10) clearInterval(t); }, 150);
+  } else {
+    window.scrollTo(0, 0);
+  }
+}
+document.addEventListener("focusin", (e) => { if (isEditable(e.target)) kbChanged(true); });
+document.addEventListener("focusout", () => {
+  setTimeout(() => { if (!isEditable(document.activeElement)) kbChanged(false); }, 60);
+});
+window.addEventListener("scroll", pinWindowDown, { passive: true });
+if (window.visualViewport) window.visualViewport.addEventListener("resize", () => {
+  // 키보드 판정: 보이는 영역이 레이아웃 뷰포트의 3/4 미만이면 키보드가 떠 있는 것
+  const layoutH = document.documentElement.clientHeight || window.innerHeight;
+  kbChanged(window.visualViewport.height < layoutH * 0.75);
+});
 
 // 기호 키보드: 커서 위치에 삽입 (폰 자판에 없는 ♥★♪ 등)
 document.querySelectorAll("#symRow .sym").forEach((b) => {
