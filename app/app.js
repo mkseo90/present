@@ -561,11 +561,14 @@ $("simToggle").onchange = (e) => {
   }
 };
 
-// 전체화면 — 버튼은 항상 표시하고, 누르는 순간 실제로 시도한다.
-// (능력 사전판정으로 숨겼더니 일부 브라우저에서 오판으로 사라지는 문제가 있었음.
-//  실패하면 통신 로그에 사유를 남긴다 → 설정 탭에서 확인 가능)
-let fsWanted = true;  // 사용자가 ⛶로 직접 끄기 전까지는 전체화면을 유지하려는 상태
-let fsFails = 0;      // 연속 진입 실패 횟수 — 2회면 자동 재시도 포기
+// 전체화면 — Bluefy는 전체화면 API 자체가 없다(실기기 채증: requestFullscreen/webkit 모두
+// undefined). 그런 브라우저에서는 ⛶ 버튼·자동 시도·실패 토스트가 전부 무의미하므로 숨긴다.
+// 대신 Bluefy 자체 메뉴의 "Full-Screen Mode"를 쓰면 된다 (앱이 관여할 수 없는 영역).
+// 안드로이드 크롬 등 API가 있는 브라우저에서는 기존대로 동작.
+const FS_API = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+let fsWanted = FS_API;  // 사용자가 ⛶로 직접 끄기 전까지는 전체화면을 유지하려는 상태
+let fsFails = 0;        // 연속 진입 실패 횟수 — 2회면 자동 재시도 포기
+if (!FS_API) $("btnFull").style.display = "none";
 function tryFullscreen() {
   const el = document.documentElement;
   const cur = document.fullscreenElement || document.webkitFullscreenElement;
