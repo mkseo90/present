@@ -156,14 +156,15 @@ function onLine(line) {
 }
 
 // ---------- BLE 연결 ----------
-async function connect() {
-  if (state.sim) return;
+// 실제 GATT 연결·서비스 결선 (기기를 어떻게 얻었는지와 무관한 공통부).
+// timeoutMs: 광고 중이 아닌 기기에 gatt.connect()가 무한 대기하는 것을 끊는다
+async function connectTo(device, timeoutMs = 8000) {
+  const killer = setTimeout(() => { try { device.gatt.disconnect(); } catch (_) {} }, timeoutMs);
   try {
-    const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [NUS_SERVICE] }],
-      optionalServices: [NUS_SERVICE],
-    });
-    device.addEventListener("gattserverdisconnected", onDisconnected);
+    if (!device._wired) {  // 재시도 시 리스너 중복 방지
+      device._wired = true;
+      device.addEventListener("gattserverdisconnected", onDisconnected);
+    }
     const server = await device.gatt.connect();
     const svc = await server.getPrimaryService(NUS_SERVICE);
     state.rxChar = await svc.getCharacteristic(NUS_RX);
@@ -178,8 +179,44 @@ async function connect() {
     // 여기서도 한 번 시도한다 — 페어링이 불필요한 펌웨어(REQUIRE_PAIRING 0)와의 호환용.
     // ERR 8이면 위 onLine 로직이 알아서 재시도 흐름으로 넘어간다
     refreshSlots();
+  } finally {
+    clearTimeout(killer);
+  }
+}
+
+// 선택창 없이 재연결: 이전에 한 번 허용한 기기(getDevices)로 직접 연결.
+// Bluefy 전체화면 모드는 페이지를 새로 로드하고 기기 선택창도 못 띄우므로
+// 이 경로가 유일한 재연결 수단이다 (브라우저가 getDevices를 지원할 때만 가능)
+async function connectKnown(timeoutMs) {
+  if (state.sim || state.device) return false;
+  if (!navigator.bluetooth || !navigator.bluetooth.getDevices) return false;
+  let devs = [];
+  try { devs = await navigator.bluetooth.getDevices(); } catch (_) { return false; }
+  for (const d of devs) {
+    try { await connectTo(d, timeoutMs || 5000); return true; } catch (_) {}
+  }
+  return false;
+}
+
+async function connect() {
+  if (state.sim) return;
+  // 1) 아는 기기로 조용히 재연결 (전체화면 등 선택창을 못 띄우는 상황 대응, 최대 ~5초)
+  if (await connectKnown()) return;
+  // 2) 기기 선택창
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [NUS_SERVICE] }],
+      optionalServices: [NUS_SERVICE],
+    });
+    await connectTo(device);
   } catch (err) {
-    if (err.name !== "NotFoundError") alert("연결 실패: " + err.message);
+    if (err.name === "NotFoundError") {
+      // 선택창이 취소됐거나(사용자) 아예 못 떴거나(Bluefy 전체화면) — 조용히 삼키면
+      // "버튼이 무반응"으로 보이므로 반드시 화면에 알린다
+      fsToast("기기를 선택하지 못했어요 — 선택창이 안 뜬다면 전체화면을 잠깐 해제하고 연결해 보세요");
+    } else {
+      alert("연결 실패: " + err.message);
+    }
   }
 }
 function disconnect() {
@@ -695,6 +732,10 @@ $("btnClrOwner").onclick = () => {
 if (!("bluetooth" in navigator)) {
   $("btnConnect").textContent = "BLE 미지원";
   $("btnConnect").disabled = true;
+} else {
+  // 페이지가 새로 뜰 때(특히 Bluefy 전체화면 진입은 페이지를 다시 로드한다)
+  // 이전에 허용한 기기로 조용히 자동 재연결 — 실패해도 아무 표시 없이 넘어간다
+  setTimeout(() => { connectKnown(6000).catch(() => {}); }, 500);
 }
 
 renderPresets();
