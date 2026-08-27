@@ -483,7 +483,10 @@ $("sendText").addEventListener("keydown", (e) => {
 function keepEditVisible() {
   if (document.activeElement !== $("sendText")) return;
   setTimeout(() => {
-    $("sendText").scrollIntoView({ block: "start", behavior: "smooth" });
+    // 미리보기를 화면 위에 붙여서 미리보기+입력창+기호 버튼이 모두 키보드 위에 보이게.
+    // (한때 이 스크롤이 북마크 바의 범인인 줄 알고 입력창 기준으로 바꿨었지만,
+    //  진범은 창 스크롤이었고 main 내부 스크롤은 무관 — 미리보기 기준이 안전하다)
+    document.querySelector("#tab-send .preview-box").scrollIntoView({ block: "start", behavior: "smooth" });
   }, 250);
 }
 $("sendText").addEventListener("focus", keepEditVisible);
@@ -495,7 +498,8 @@ if (window.visualViewport) window.visualViewport.addEventListener("resize", keep
 // → 키보드가 열리면 body에 여유(padding)를 만들고 창 자체를 아래로 내려 바를 접는다.
 //   iOS 자체 포커스 스크롤이 창을 도로 최상단으로 올려놓을 수 있어 잠시 반복 보정하고,
 //   키보드가 떠 있는 동안 창이 최상단으로 돌아가면 즉시 다시 내린다.
-const KB_SCROLL = 72;
+// 헤더 높이(~52px)와 비슷하게 — 더 크면 미리보기 상단까지 잘려 나간다
+const KB_SCROLL = 56;
 // Bluefy(iOS) 전용 — 안드로이드/데스크톱은 상단 바 문제가 없으니 건드리지 않는다
 const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
