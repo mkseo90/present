@@ -1,8 +1,72 @@
-# HANDOFF — 브링업 상태 (2026-08-19)
+# HANDOFF — 프로젝트 상태 (2026-08-27 갱신)
 
 다른 PC에서 이어서 작업하기 위한 상태 스냅샷.
 
-## 현재 상태 (한 줄 요약)
+## 현재 상태 (2026-08-27)
+
+**핵심 기능 전부 동작**: BLE(LESC 페어링)·잔상 출력(실측 최적 2~8ms/컬럼)·한글+자모+기호
+폰트·슬롯 저장·OLED 공존·앱(v27, iPhone Bluefy 실사용 검증). 보드에는 최신 빌드
+플래시됨(스윙 반동기화 + 문장 사이 빈 틈 + HW 탭엔진 + `BOOTDFU` 명령).
+
+**Bluefy 사용법 확정**: 주소창 제거는 Bluefy 자체 메뉴의 **Full-Screen Mode**
+(웹 전체화면 API는 Bluefy에 없음 — 실기기 채증). 풀스크린 진입은 페이지를 재로드하므로
+앱이 로드 시 자동 재연결(getDevices)을 시도한다(v26, Bluefy의 getDevices 지원 여부 검증 중).
+
+**미해결/검증 대기 (우선순위순)**:
+1. **좌우반전** — 방향감지 유효성 의심. 사용자 A/B/C 판정 대기
+   (A=한쪽 방향만 항상 거울=IMU 방향감지 무효→재설계 / B=양쪽 랜덤 / C=SET FLIP으로 해결)
+2. **톡톡(더블탭) 슬롯 전환** — HW 탭엔진 구현·플래시됨, [tap] 디버그 로그 결과 미보고
+3. **BOOTDFU 명령** — 플래시됐지만 실전 미검증 (검증되면 케이스 조립 후에도 무선 트리거 굽기 가능)
+4. 풀스크린 상태에서 자동 재연결(getDevices) 실기기 검증
+5. 선물 최종화: DEBUG_BEACON 0, 실명 SETOWNER, 송별 슬롯 채우기, 안내서에 풀스크린 사용법 추가
+6. 백로그: 지선 보드 합체 검증, 박수 폭죽·이스터에그·손글씨 롤링페이퍼, 배터리 확정 시 100mA 충전
+
+## 집 PC 빠른 시작 (환경 셋팅 전체)
+
+설치할 것: **git, Python 3, arduino-cli** 세 개. 컴파일러(arm-none-eabi-gcc)는 따로 깔지
+않는다 — 보드 패키지에 동봉되어 arduino-cli가 자동 사용한다. Arduino IDE도 불필요
+(이미 깔려 있다면 arduino-cli가 내장되어 있음: `resources\app\lib\backend\resources\arduino-cli.exe`).
+
+```
+# 0) 소스
+git clone https://github.com/mkseo90/present.git pov-wand
+cd pov-wand
+pip install pyserial bleak            # flash.py / ble_selftest.py 용
+
+# 1) arduino-cli (공식 zip 풀어서 PATH에 두면 끝. GitHub releases의 latest 경로는 404 주의)
+#    https://downloads.arduino.cc/arduino-cli/arduino-cli_latest_Windows_64bit.zip
+
+# 2) Seeed 보드 패키지 (arm-gcc 9-2019q4 + CMSIS + adafruit-nrfutil 포함, 약 270MB)
+arduino-cli config init
+arduino-cli config add board_manager.additional_urls https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
+arduino-cli core update-index
+arduino-cli core install Seeeduino:nrf52@1.1.13     # mbed 버전 아님! 반드시 1.1.13
+
+# 3) 라이브러리 (내장 IMU용 딱 하나. 이 PC 설치본은 2.0.7)
+arduino-cli lib install "Seeed Arduino LSM6DS3"
+
+# 4) 빌드 → 굽기 (USB-C만 꽂으면 flash.py가 알아서: 터치→부트로더→DFU)
+arduino-cli compile -e --fqbn Seeeduino:nrf52:xiaonRF52840Sense firmware/pov-wand
+python firmware/tools/flash.py
+```
+
+- `secrets.h` 불필요 (`__has_include` — 없어도 컴파일)
+- 그 외 외부 라이브러리 불필요: BLE(bluefruit)·LittleFS는 보드 패키지 내장,
+  폰트·SSD1306 OLED 드라이버는 소스에 직접 구현. Adafruit DotStar/NeoPixel은
+  LED_TYPE 1/2(RGB 스트립)에서만 필요 — 현재 선물용은 LED_TYPE 3(단색 GPIO 직결)
+- **repo에 없는 것** (takehome zip에만 있음): `docs/`(사용안내서 docx/pdf, QR),
+  `firmware/pov-wand/secrets.h`(없어도 컴파일됨), `firmware/pov-wand/build/`(재빌드하면 됨)
+- 웹앱 수정 → 배포 절차: `python firmware/tools/stamp_app.py` (빌드시각+캐시버스터 자동)
+  → bash로 커밋(한글 커밋메시지는 PowerShell이 깨뜨림) → push → main에 ff-merge → push.
+  GitHub Pages 캐시 10분 — 폰에서 설정 탭 빌드시각으로 반영 확인
+- 폰트 재생성은 `firmware/tools/` 디렉토리 **안에서** `python gen_font.py` (ttf 상대경로)
+  → `python gen_font_js.py`
+
+---
+
+이하는 과거 브링업 기록(2026-08-19) — 재조사 금지 목록과 검증 근거로 유지.
+
+## (기록) 브링업 당시 요약
 
 **"BLE 수신 즉시 프리즈" 버그 해결. 실기기(2번 보드) 검증 완료 — PING 왕복, INFO/LIST
 분할 응답, LittleFS 슬롯 저장·조회·삭제·재부팅 영속성, POV 스캔 중 BLE 생존까지 전부 통과.
@@ -211,25 +275,10 @@ GPIO 전환을 멈추면(`TEST off`) 소리가 멎는 것으로 확인됨. 부�
 | 보드 개체 불량 | 보드 2개에서 유사 증상 (단, 1번 보드는 별도 재검 필요) |
 | LittleFS / InternalFS 플래시 영역 충돌 | 코드 리뷰로 스택오버플로 원인 특정 — FS는 무죄 (재검 불필요) |
 
-## 다음 단계 (여기서부터)
+## (기록) 당시 다음 단계
 
-1. **수정본 그대로 굽고 `PING` 전송** (현재 코드는 아직 `USE_FS 0`).
-   기대: 시리얼에 `RX: PING` → `TX: PONG`, 폰에 `PONG`, [hb] 하트비트 지속.
-   - 하트비트의 `stackFreeWords` 값을 기록해둘 것. `handleLine()` 호출 후에도 여유가
-     남는지가 이 가설의 최종 확인이다.
-2. **통과하면 `USE_FS 1`로 되돌리고 재테스트** (`PING` → `SAVE 1 00FF66 사랑해` → `LIST`).
-   FS는 무죄로 판단했으므로 여기서 문제가 없어야 정상. `LIST` 응답이 잘리지 않고
-   전부 오는지도 같이 확인 (reply 분할 전송 검증).
-3. **그래도 수신 즉시 죽으면** 스택이 여전히 부족한 것이므로, 이분탐색 대신 스택을
-   직접 계산할 것:
-   - 컴파일된 `.lst`/디스어셈블에서 `handleLine`의 `sub sp, #N` 값을 확인
-   - `content`(6KB)·`imgRx`(6KB)는 전역이라 문제 없지만, 지역에 큰 배열을 만드는
-     코드가 또 있는지 점검 (`loadSlot`의 `text[128]`, `replyf`의 `buf[120]` 등)
-   - 최후 수단: `MAX_COLS`를 128로 줄이거나, 이미지 수신 버퍼를 슬롯 저장 스트리밍으로 대체
-4. 안정화 후: 디버그 코드 정리(하트비트 [hb]·stackFreeWords, `TEST` 명령은 HW 검사용으로
-   유지 검토), 그 다음 POV 잔상 테스트(`SET MODE pov` + `SET SPEED 10`, 흔들기).
-5. 그 다음 미구현 항목: IMU 스윙 감지(`isSwinging`/`swingPeriodUs`가 스텁),
-   배터리 ADC(`readBattery`가 100 고정), 버튼 디바운스.
+(전부 완료됨 — 프리즈 재현 없음, USE_FS 1 검증 통과, POV·IMU·배터리 ADC 구현 완료.
+현재 할 일은 문서 맨 위 "미해결/검증 대기" 참고)
 
 ## 환경 세팅
 
@@ -265,18 +314,27 @@ GPIO 전환을 멈추면(`TEST off`) 소리가 멎는 것으로 확인됨. 부�
 5. FQBN: `Seeeduino:nrf52:xiaonRF52840Sense`
 6. 라이브러리: Adafruit NeoPixel (LED_TYPE 2용, 지금은 불필요)
 
-## 펌웨어 굽는 절차 (Windows, IDE 업로드가 꼬일 때)
+## 펌웨어 굽는 절차 (표준: 감시 플래셔, 리셋 버튼 불필요)
 
 ```
-# 1) 보드 리셋 버튼 재빨리 2번 (부트로더 진입, 포트 번호가 바뀜)
-# 2) 부트로더 포트 확인
-arduino-cli board list
-# 3) 빌드 & 굽기 (IDE에서 스케치 → 컴파일된 바이너리 내보내기 후)
-adafruit-nrfutil dfu serial -pkg <build>/pov-wand.ino.zip -p COM<N> -b 115200 --singlebank
+# 1) 빌드
+arduino-cli compile -e --fqbn Seeeduino:nrf52:xiaonRF52840Sense firmware/pov-wand
+# 2) 감시 플래셔 실행 → USB-C만 꽂으면 자동으로 (터치 → 부트로더 → 플래시)
+python firmware/tools/flash.py
 ```
+
+flash.py가 하는 일: XIAO 앱 포트(VID 0x2886)가 보이면 **1200bps 터치**로 부트로더 재부팅,
+부트로더 포트가 보이면 즉시 DFU. 리셋 2번을 미리 눌러둬도(부트로더 상태) 그대로 잡는다.
+adafruit-nrfutil은 보드 패키지 안에서 자동 탐색. 의존성: `pip install pyserial`.
+
+- 케이스 조립 후: 앱 관리자 모드 → 원시 명령 `BOOTDFU` → 보드가 스스로 부트로더 진입
+  (펌웨어 v0.0.2+, 페어링된 연결에서만. 이후 flash.py가 이어받음)
+- 완드가 USB에 안 잡히면: 충전전용 케이블(데이터선 없음)부터 의심할 것.
+  FTDI 등 다른 USB-시리얼과 혼동 금지 — XIAO는 VID 0x2886(Seeed)
+- (구방식) 수동 더블탭 + `arduino-cli board list`로 새 포트 확인 후
+  `adafruit-nrfutil dfu serial -pkg <build>/pov-wand.ino.zip -p COM<N> -b 115200`
 - arduino-cli는 Arduino IDE에 내장 (resources/app/lib/backend/resources/)
-- adafruit-nrfutil은 보드 패키지 tools/ 안에 있음
-- --touch 1200 자동 리셋은 이 환경에서 신뢰 불가 → 수동 더블탭 + 새 포트 확인이 확실
+- nrfutil 자체의 --touch 1200 옵션은 신뢰 불가(부트로더가 새 COM번호로 뜸) — flash.py가 대체
 
 ## 테스트 절차
 

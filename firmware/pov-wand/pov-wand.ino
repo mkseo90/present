@@ -624,6 +624,15 @@ void handleLine(char* line) {
 
   if (strcmp(cmd, "PING") == 0) { reply("PONG"); return; }
 
+  // 부트로더 진입 (USB 시리얼 DFU) — 케이스 조립 후 리셋 버튼을 못 누르는 상황용.
+  // 페어링된 연결에서만 도달 가능(위 ERR 8 게이트). 응답을 보낸 뒤 재부팅한다
+  if (strcmp(cmd, "BOOTDFU") == 0) {
+    reply("OK BOOTDFU rebooting");
+    delay(300);           // notify가 나갈 시간
+    enterSerialDfu();     // GPREGRET 매직 세팅 후 리셋 → 부트로더 시리얼 DFU 모드
+    return;               // 도달하지 않음
+  }
+
   // IMU 상태 조회 (스윙 감지 튜닝용)
   if (strcmp(cmd, "IMU") == 0) {
 #if USE_IMU
